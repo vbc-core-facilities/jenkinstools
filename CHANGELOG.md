@@ -7,7 +7,8 @@ see [Versioning](README.md#versioning). Newest first within each tool.
 
 ### deployStandardProteomicsService/v1.0.0 - 2026-09-29
 First release: the protchem conventions on top of deployService. It sets:
-- namespace, branches, and Tower job names derived from `towerName`
+- namespace, branches, the Tower staging branch and tag variable (the Tower job names themselves are
+  required inputs, mapped by hand)
 - the standard build args and the NuGet BuildKit secret
 - the test folder, the OCP smoke, and the cockpit notification
 

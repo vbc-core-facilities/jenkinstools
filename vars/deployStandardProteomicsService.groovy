@@ -10,17 +10,16 @@
  * Required:
  *   imageName            image name, pushed as protchem/<imageName>
  *   dockerFile           path to the Dockerfile
- *   towerName            the service's name in Tower job names: 'Hive Frontend' gives
- *                        'App Protchem Hive Frontend Staging' / 'App Protchem Hive Frontend Production'.
- *                        Not needed when `tower` is given in full, or with tower: false.
+ *   towerStagingJobName     the Tower staging job, exactly as named in Tower
+ *   towerProductionJobName  the Tower production job, exactly as named in Tower
+ *                           Both are mapped by hand (IT names them); not needed with tower: false.
  *
  * Conventions (defaults) and how to override them:
  *   imageNamespace       'protchem'
  *   pushBranches         ['master', 'develop']
- *   tower                [staging: 'App Protchem <towerName> Staging', stagingBranch: 'master',
- *                         production: 'App Protchem <towerName> Production',
- *                         imageTagVariable: 'app_generic_image_tag'].
- *                        A Map is merged over these (e.g. just [production: '...']); false = no Tower.
+ *   tower                [stagingBranch: 'master', imageTagVariable: 'app_generic_image_tag'];
+ *                        a Map is merged over these; false = no Tower (build and push only).
+ *                        Staging runs on pushes to stagingBranch, production on tags.
  *   testResultsFolder    '/app/tests/results' (tests: false for no test step at all)
  *   ocpSmoke             true
  *   buildArgs            merged over the standard build args below; a null value removes one:
@@ -42,9 +41,13 @@ def call(Map config = [:]) {
     echo "deployStandardProteomicsService v${toolVersion()} (jenkinstools)"
 
     List<String> problems = ['imageName', 'dockerFile'].findAll { !config[it] }.collect { "${it} is required".toString() }
-    boolean towerGivenInFull = config.tower instanceof Map && config.tower.staging && config.tower.production
-    if (config.tower != false && !config.towerName && !towerGivenInFull) {
-        problems << 'towerName is required (or pass tower in full, or tower: false)'
+    if (config.tower != false && !config.towerJobs) {
+        ['towerStagingJobName', 'towerProductionJobName'].findAll { !config[it] }.each {
+            problems << "${it} is required (or tower: false for no Tower)".toString()
+        }
+    }
+    if (config.tower instanceof Map && (config.tower.staging || config.tower.production)) {
+        problems << 'set the Tower jobs with towerStagingJobName / towerProductionJobName, not tower.staging / tower.production'
     }
     if (problems) {
         error("deployStandardProteomicsService: invalid configuration:\n  - ${problems.join('\n  - ')}")
@@ -75,19 +78,16 @@ def call(Map config = [:]) {
     }
     (config.secrets ?: []).each { Map s -> secretsById[s.id as String] = s }
 
-    // ---- tower: naming convention, merged with the repo's overrides ------------------------------------
+    // ---- tower: the hand-mapped job names + branch / tag-variable conventions ---------------------------
     Map tower = null
     if (config.tower != false && !config.towerJobs) {
-        tower = [stagingBranch: 'master', imageTagVariable: 'app_generic_image_tag']
-        if (config.towerName) {
-            tower.staging = "App Protchem ${config.towerName} Staging".toString()
-            tower.production = "App Protchem ${config.towerName} Production".toString()
-        }
-        tower += (config.tower instanceof Map ? config.tower : [:])
+        tower = [stagingBranch: 'master', imageTagVariable: 'app_generic_image_tag'] +
+                (config.tower instanceof Map ? config.tower : [:]) +
+                [staging: config.towerStagingJobName, production: config.towerProductionJobName]
     }
 
     // ---- everything else passes through ----------------------------------------------------------------
-    Set<String> handled = ['towerName', 'tower', 'tests', 'testResultsFolder', 'buildArgs', 'defaultBuildArgs',
+    Set<String> handled = ['towerStagingJobName', 'towerProductionJobName', 'tower', 'tests', 'testResultsFolder', 'buildArgs', 'defaultBuildArgs',
                            'secrets', 'defaultSecrets', 'imageNamespace', 'pushBranches', 'ocpSmoke', 'cockpitNotify'] as Set
     Map passThrough = config.findAll { k, v -> !(k in handled) }
 

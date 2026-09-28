@@ -9,7 +9,7 @@ Small, reusable [Jenkins shared library](https://www.jenkins.io/doc/book/pipelin
 | `buildEventMessage` | Builds a generic `jenkins-build-event/v1` message describing the current build. |
 | `vbcDeploymentCockpitNotify` | Sends a build event to the VBC Deployment Cockpit (fixed topic), so the cockpit shows the build as running. |
 | `deployService` | Generic service pipeline wiring with **no defaults**: build args and BuildKit secrets, build-info reporting, in-image tests and OCP smoke, push, Tower, cockpit notification, and pre/post actions. |
-| `deployStandardProteomicsService` | The protchem conventions (names, branches, standard build args, secrets, tests, notification) on top of `deployService`, all overridable. A standard service needs only its image, Dockerfile and Tower name. |
+| `deployStandardProteomicsService` | The protchem conventions (namespace, branches, standard build args, secrets, tests, notification) on top of `deployService`, all overridable. A standard service needs only its image, Dockerfile and its two Tower job names. |
 
 **Failures don't break the build by default.** Any notification problem only prints a warning and the build carries on. `failOnError: true` fails the build instead. Aborting a build is never swallowed.
 
@@ -51,7 +51,7 @@ library identifier: 'jenkinstools@deployStandardProteomicsService/v1.0.0',
 | | `deployService` | `deployStandardProteomicsService` |
 | --- | --- | --- |
 | **Role** | The wiring. It understands every input and does the build, injection, reporting, testing, push, Tower and notification | The protchem conventions. It fills in defaults and calls `deployService` |
-| **Defaults** | **None.** Everything it uses must be passed; optional features are off unless configured | Namespace, branches, Tower job names, standard build args, NuGet secret, tests, OCP smoke, cockpit notification. All overridable |
+| **Defaults** | **None.** Everything it uses must be passed; optional features are off unless configured | Namespace, branches, Tower staging branch and tag variable, standard build args, NuGet secret, tests, OCP smoke, cockpit notification. All overridable. Tower job names are always given by hand |
 | **Use for** | Services that don't follow the conventions, e.g. proteomicshelper.python | Standard protchem .NET services |
 
 Both are used the same way: all configuration is defined as variables at the top of the Jenkinsfile, and the call only wires those variables in.
@@ -63,23 +63,27 @@ library identifier: 'jenkinstools@deployStandardProteomicsService/v1.0.0',
         retriever: modernSCM([$class: 'GitSCMSource', remote: 'https://github.com/vbc-core-facilities/jenkinstools.git'])
 
 // ############################## configuration ##############################
-def my_image_name = 'hive.core'
-def my_dockerfile = 'Hive.Core.WebAPI/Dockerfile'
-def my_tower_name = 'Hive Core' // -> 'App Protchem Hive Core Staging' / '... Production'
+def my_image_name               = 'hive.core'
+def my_dockerfile               = 'Hive.Core.WebAPI/Dockerfile'
+def my_ansible_job_name_staging = 'App Protchem Hive Core Staging'
+def my_ansible_job_name_prod    = 'App Protchem Hive Core Production'
 // ###########################################################################
 
 deployStandardProteomicsService(
-  imageName : my_image_name,
-  dockerFile: my_dockerfile,
-  towerName : my_tower_name,
+  imageName             : my_image_name,
+  dockerFile            : my_dockerfile,
+  towerStagingJobName   : my_ansible_job_name_staging,
+  towerProductionJobName: my_ansible_job_name_prod,
 )
 ```
+
+Required inputs: `imageName`, `dockerFile`, `towerStagingJobName` and `towerProductionJobName`. The Tower jobs are named by IT, so they're mapped by hand and never derived. Neither is needed with `tower: false`.
 
 | Convention | Default | Override |
 | --- | --- | --- |
 | `imageNamespace` | `protchem` | any value |
 | `pushBranches` | `['master', 'develop']` | any list |
-| `tower` | staging `App Protchem <towerName> Staging` on `master`; production `App Protchem <towerName> Production` on tags with `app_generic_image_tag: <tag>` | A Map merged over these, e.g. only `[production: '…']`. `false` for no Tower. `towerName` is required unless `tower` is given in full or is `false` |
+| `tower` | staging job on pushes to `master`; production job on tags with `app_generic_image_tag: <tag>` | A Map with `stagingBranch` and/or `imageTagVariable`. `false` for no Tower (build and push only) |
 | `testResultsFolder` | `/app/tests/results` | any path. `tests: false` means no test step at all |
 | `ocpSmoke` | on | `false` |
 | `buildArgs` | `NUGET_REPO_USER=vbc-proteomics`, `MINVER_VERSION_OVERRIDE=<tag without v>`, `ASPNET_PORT=8080`, `APP_USER=app`, `APP_GROUP_GID=0`, `TEST_RESULTS_FOLDER=<testResultsFolder>`, `SEQ_VERSION=2026.1.17044` | Merged over the defaults; any new names work, and `null` removes one (e.g. `[SEQ_VERSION: null]` for no Seq). `defaultBuildArgs: false` starts empty |
