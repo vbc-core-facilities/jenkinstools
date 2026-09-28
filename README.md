@@ -8,37 +8,93 @@ Small, reusable [Jenkins shared library](https://www.jenkins.io/doc/book/pipelin
 | `serviceBusNotify` | Sends any message to an Azure Service Bus queue or topic, given a connection string or a SAS token. |
 | `buildEventMessage` | Builds a generic `jenkins-build-event/v1` message describing the current build. |
 | `vbcDeploymentCockpitNotify` | Sends a build event to the VBC Deployment Cockpit (fixed topic), so the cockpit shows the build as running. |
+| `deployService` | The whole protchem service pipeline, with the Jenkinsfile reduced to its configuration. |
 
-**Failures don't break the build by default.** Any problem only prints a warning and the build carries on. `failOnError: true` fails the build instead. Aborting a build is never swallowed.
+**Failures don't break the build by default.** Any notification problem only prints a warning and the build carries on. `failOnError: true` fails the build instead. Aborting a build is never swallowed.
 
-**Requirements:** the steps run inside `node {}` and use `sh` and `curl` (7.55 or newer). `serviceBusNotify` with a connection string also needs `openssl` on the agent.
+**Requirements:** the steps run inside `node {}` and use `sh` and `curl` (7.55 or newer). `serviceBusNotify` with a connection string also needs `openssl` on the agent. `deployService` also needs IT's `buildDockerImage` (the implicitly loaded `vbc-cicd` library).
+
+## Versioning
+
+**Every tool in this library is versioned. There are no unversioned consumers.**
+
+- **Releases are immutable git tags `vMAJOR.MINOR.PATCH`**, e.g. `v1.1.0`. A tag is never moved or deleted once pushed. A fix is a new tag.
+- **Semver applies to every step's arguments and behaviour:**
+  - **MAJOR:** anything that could break an existing Jenkinsfile, such as a removed or renamed argument, a changed default, or a changed message schema.
+  - **MINOR:** new steps or new optional arguments.
+  - **PATCH:** fixes that don't change the interface.
+- **Jenkinsfiles pin an exact release:** `library identifier: 'jenkinstools@v1.1.0', …`. Never pin `main` in a real pipeline; `main` is for testing a change on one throwaway branch.
+- **Roll out gradually** by bumping the pin one Jenkinsfile at a time. Every other pipeline stays locked to the version it already has until you bump it too. To roll back, revert the pin.
+- **Every release updates `resources/jenkinstools/VERSION` and `CHANGELOG.md`** in the tagged commit. `deployService` prints the version at the start of each build, so the log shows which release a job ran.
+- **Releasing:** commit, update `VERSION` and `CHANGELOG.md`, then `git tag -a vX.Y.Z -m vX.Y.Z && git push origin main vX.Y.Z`.
+
+`v1` is the first release; it predates the three-part scheme and is equivalent to `v1.0.0`.
 
 ## Loading
 
-The repository is public, so no credential or extra configuration is needed. Pin it to a tag or commit:
+The repository is public, so no credential or extra configuration is needed:
 
 ```groovy
-library identifier: 'jenkinstools@v1',
+library identifier: 'jenkinstools@v1.1.0',
         retriever: modernSCM([$class: 'GitSCMSource', remote: 'https://github.com/vbc-core-facilities/jenkinstools.git'])
 ```
 
-## VBC Deployment Cockpit build notifications
+## A service Jenkinsfile with `deployService`
 
-The only input is the connection string of a Send-only policy on the cockpit's topic:
+The whole Jenkinsfile:
 
 ```groovy
-withCredentials([string(credentialsId: '<id>', variable: 'COCKPIT_SB')]) {   // or however you get the value
-  node { vbcDeploymentCockpitNotify('started', COCKPIT_SB) }
-  try {
-    buildDockerImage([ /* ... existing pipeline, unchanged ... */ ])
-  } catch (e) {
-    currentBuild.result = 'FAILURE'   // so 'finished' reports the real result
-    throw e
-  } finally {
-    node { vbcDeploymentCockpitNotify('finished', COCKPIT_SB) }
-  }
+library identifier: 'jenkinstools@v1.1.0',
+        retriever: modernSCM([$class: 'GitSCMSource', remote: 'https://github.com/vbc-core-facilities/jenkinstools.git'])
+
+deployService(
+  imageName    : 'hive.frontend',
+  dockerFile   : 'Hive.Frontend/Dockerfile',
+  tower        : [staging   : 'App Protchem Hive Frontend Staging',
+                  production: 'App Protchem Hive Frontend Production'],
+  cockpitNotify: [credentialsId: 'vbc-cockpit-service-bus-send'],
+)
+```
+
+`deployService` runs these steps:
+1. Assembles the default build args plus `buildArgs`, and passes the NuGet PAT as a BuildKit secret.
+2. Prints build info.
+3. Notifies the cockpit that the build started.
+4. Calls IT's `buildDockerImage`, whose test step collects in-image JUnit results (optionally running `testScript` first) and runs the OCP arbitrary-UID probe smoke.
+5. Pushes the image on `pushBranches`.
+6. Runs the Tower staging job on `master` and the production job on tags.
+7. Notifies the cockpit that the build finished, with the real result.
+
+All options are documented at the top of [`vars/deployService.groovy`](vars/deployService.groovy). The common ones:
+
+| Option | Default | Meaning |
+| --- | --- | --- |
+| `imageName`, `dockerFile` | required | Image `protchem/<imageName>` built from `dockerFile` |
+| `tower` | none | `[staging: '<job>', production: '<job>', stagingBranch: 'master', imageTagVariable: 'app_generic_image_tag']` |
+| `pushBranches` | `['master', 'develop']` | Branches whose images are pushed |
+| `buildArgs` | | Extra or overriding build args. `defaultBuildArgs: false` starts from an empty set |
+| `nugetSecret` | `vbc-proteomics-github-pat` → `SECRETS-NUGET-REPO-PW` | `false` for images without the private NuGet feed |
+| `tests` / `testScript` / `ocpSmoke` / `ocpSmokeExtraChecks` | on / none / on / none | Test and smoke behaviour. `tests: false` skips both |
+| `cockpitNotify` | skipped | `[credentialsId: '…']` or `[connectionString: '…']` |
+| `beforeBuild` / `afterBuild` | | Closures for repo-specific extras |
+
+## VBC Deployment Cockpit build notifications
+
+Outside `deployService`, the step takes a credential id or the connection string value of a Send-only policy on the cockpit's topic:
+
+```groovy
+node { vbcDeploymentCockpitNotify('started', [credentialsId: 'vbc-cockpit-service-bus-send']) }
+try {
+  buildDockerImage([ /* ... */ ])
+} catch (e) {
+  currentBuild.result = 'FAILURE'   // so 'finished' reports the real result
+  throw e
+} finally {
+  node { vbcDeploymentCockpitNotify('finished', [credentialsId: 'vbc-cockpit-service-bus-send']) }
 }
 ```
+
+If the credential doesn't exist, it only prints a warning (unless `failOnError: true`). `vbcDeploymentCockpitNotify('started', '<connection string>')` also works.
 
 ## Service Bus: key vs connection string vs SAS token
 
