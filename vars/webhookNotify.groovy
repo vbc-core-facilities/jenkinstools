@@ -1,4 +1,6 @@
 /**
+ * Version 1.0.0 - released as tag webhookNotify/v1.0.0 (see CHANGELOG.md). Bump both with every change to this file.
+ *
  * Sends an arbitrary message to an arbitrary HTTP(S) endpoint. Knows nothing about the receiver.
  *
  * Must be called inside a node { } block (uses sh + curl >= 7.55 on the agent).

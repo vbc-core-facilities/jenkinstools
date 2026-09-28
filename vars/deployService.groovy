@@ -2,9 +2,9 @@
  * The whole protchem service pipeline: build the Docker image with IT's buildDockerImage (vbc-cicd),
  * inject the NuGet feed secret, collect in-image test results, run the OCP arbitrary-UID probe
  * smoke, push, trigger Tower, and notify the VBC Deployment Cockpit. A Jenkinsfile only supplies
- * its configuration:
+ * its configuration. Version 1.0.0 - released as tag deployService/v1.0.0.
  *
- *   library identifier: 'jenkinstools@v1.1.0', retriever: modernSCM([$class: 'GitSCMSource',
+ *   library identifier: 'jenkinstools@deployService/v1.0.0', retriever: modernSCM([$class: 'GitSCMSource',
  *           remote: 'https://github.com/vbc-core-facilities/jenkinstools.git'])
  *
  *   deployService(
@@ -55,7 +55,7 @@ def call(Map config = [:]) {
         error("deployService: missing required configuration: ${missing.join(', ')}")
     }
 
-    echo "deployService from jenkinstools ${libraryVersion()}"
+    echo "deployService v${toolVersion()} (jenkinstools)"
 
     String tagName = env.TAG_NAME ?: 'latest'
     String testResultsFolder = config.testResultsFolder ?: '/app/tests/results'
@@ -98,7 +98,7 @@ def call(Map config = [:]) {
             towerJobs[t.stagingBranch] = [jobName: t.staging]
         }
         if (t.production) {
-            towerJobs.tags = [jobName: t.production, extraVars: "${t.imageTagVariable}: ${tagName}"]
+            towerJobs.tags = [jobName: t.production, extraVars: "${t.imageTagVariable}: ${tagName}".toString()]
         }
     }
 
@@ -124,8 +124,9 @@ def call(Map config = [:]) {
         dockerFile           : config.dockerFile,
         pushRegistryNamespace: config.imageNamespace ?: 'protchem',
         pushBranches         : config.pushBranches ?: ['master', 'develop'],
-        extraBuildArgs       : extraBuildArgs,
     ]
+    // Only when there is something to pass, like Jenkinsfiles that never set it.
+    if (extraBuildArgs) image.extraBuildArgs = extraBuildArgs
     if (config.dockerContext) image.dockerContext = config.dockerContext
     if (towerJobs) image.tower = towerJobs
     if (config.tests != false) image.test = testClosure(config, testResultsFolder)
@@ -143,13 +144,8 @@ def call(Map config = [:]) {
     }
 }
 
-private String libraryVersion() {
-    try {
-        return libraryResource('jenkinstools/VERSION').trim()
-    } catch (Exception e) {
-        return '(unknown version)'
-    }
-}
+// This tool's own version; bump it (and tag deployService/vX.Y.Z) with every change to this file.
+private String toolVersion() { return '1.0.0' }
 
 private void notifyCockpit(Map cockpit, String event) {
     if (!cockpit) {

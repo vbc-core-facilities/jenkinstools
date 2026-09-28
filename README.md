@@ -16,43 +16,56 @@ Small, reusable [Jenkins shared library](https://www.jenkins.io/doc/book/pipelin
 
 ## Versioning
 
-**Every tool in this library is versioned. There are no unversioned consumers.**
+**Every tool in this library is versioned, independently of the others. There are no unversioned consumers.**
 
-- **Releases are immutable git tags `vMAJOR.MINOR.PATCH`**, e.g. `v1.1.0`. A tag is never moved or deleted once pushed. A fix is a new tag.
-- **Semver applies to every step's arguments and behaviour:**
+- **Each tool has its own semver version.** It's stated in the header of its `vars/<tool>.groovy`, and each release is an immutable git tag `<tool>/vMAJOR.MINOR.PATCH`, e.g. `deployService/v1.0.0` or `vbcDeploymentCockpitNotify/v1.1.0`. A tag is never moved or deleted once pushed. A fix is a new tag.
+- **Semver applies to the tool's arguments and behaviour:**
   - **MAJOR:** anything that could break an existing Jenkinsfile, such as a removed or renamed argument, a changed default, or a changed message schema.
-  - **MINOR:** new steps or new optional arguments.
+  - **MINOR:** new optional arguments or behaviour.
   - **PATCH:** fixes that don't change the interface.
-- **Jenkinsfiles pin an exact release:** `library identifier: 'jenkinstools@v1.1.0', …`. Never pin `main` in a real pipeline; `main` is for testing a change on one throwaway branch.
-- **Roll out gradually** by bumping the pin one Jenkinsfile at a time. Every other pipeline stays locked to the version it already has until you bump it too. To roll back, revert the pin.
-- **Every release updates `resources/jenkinstools/VERSION` and `CHANGELOG.md`** in the tagged commit. `deployService` prints the version at the start of each build, so the log shows which release a job ran.
-- **Releasing:** commit, update `VERSION` and `CHANGELOG.md`, then `git tag -a vX.Y.Z -m vX.Y.Z && git push origin main vX.Y.Z`.
+  - Changing a tool that others use (e.g. `serviceBusNotify`, which `deployService` uses) releases that tool. The tools that depend on it get a new release only when they want to pick the change up.
+- **A Jenkinsfile pins the tag of the tool it calls:** `library identifier: 'jenkinstools@deployService/v1.0.0', …`.
+  - **How loading works:** Jenkins loads the library at that single git ref, so the tools the pinned tool uses come from the same commit. That snapshot was released and tested together.
+  - **Calling several tools directly** means you pin one of their tags; the others are whatever they were at that commit.
+  - **Never pin `main`** in a real pipeline. It's only for trying a change on one throwaway branch.
+- **Roll out gradually:** release a new tag of a tool, then bump the pin one Jenkinsfile at a time. Every other pipeline stays locked to the release it already has. To roll back, revert the pin.
+- **Every release updates, in the tagged commit:**
+  - the version in the tool's header, plus its `toolVersion()` where it has one (`deployService` prints it in the build log)
+  - the tool's section in `CHANGELOG.md`
+- **Releasing a tool:** commit, then `git tag -a <tool>/vX.Y.Z -m "<tool> vX.Y.Z" && git push origin main <tool>/vX.Y.Z`.
 
-`v1` is the first release; it predates the three-part scheme and is equivalent to `v1.0.0`.
+`v1` is a legacy whole-library tag from before per-tool versioning, kept for existing pins. See CHANGELOG.md.
 
 ## Loading
 
-The repository is public, so no credential or extra configuration is needed:
+The repository is public, so no credential or extra configuration is needed. Pin the tag of the tool you call:
 
 ```groovy
-library identifier: 'jenkinstools@v1.1.0',
+library identifier: 'jenkinstools@deployService/v1.0.0',
         retriever: modernSCM([$class: 'GitSCMSource', remote: 'https://github.com/vbc-core-facilities/jenkinstools.git'])
 ```
 
 ## A service Jenkinsfile with `deployService`
 
-The whole Jenkinsfile:
+The whole Jenkinsfile. All configuration is defined as variables at the top, and the `deployService` call only wires those variables in:
 
 ```groovy
-library identifier: 'jenkinstools@v1.1.0',
+library identifier: 'jenkinstools@deployService/v1.0.0',
         retriever: modernSCM([$class: 'GitSCMSource', remote: 'https://github.com/vbc-core-facilities/jenkinstools.git'])
 
+// ############################## configuration ##############################
+def my_image_name                 = 'hive.frontend'
+def my_dockerfile                 = 'Hive.Frontend/Dockerfile'
+def my_ansible_job_name_staging   = 'App Protchem Hive Frontend Staging'
+def my_ansible_job_name_prod      = 'App Protchem Hive Frontend Production'
+def my_cockpit_notify_credentials = 'vbc-cockpit-service-bus-send'
+// ###########################################################################
+
 deployService(
-  imageName    : 'hive.frontend',
-  dockerFile   : 'Hive.Frontend/Dockerfile',
-  tower        : [staging   : 'App Protchem Hive Frontend Staging',
-                  production: 'App Protchem Hive Frontend Production'],
-  cockpitNotify: [credentialsId: 'vbc-cockpit-service-bus-send'],
+  imageName    : my_image_name,
+  dockerFile   : my_dockerfile,
+  tower        : [staging: my_ansible_job_name_staging, production: my_ansible_job_name_prod],
+  cockpitNotify: [credentialsId: my_cockpit_notify_credentials],
 )
 ```
 

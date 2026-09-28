@@ -1,4 +1,6 @@
 /**
+ * Version 1.1.0 - released as tag vbcDeploymentCockpitNotify/v1.1.0 (see CHANGELOG.md). Bump both with every change to this file.
+ *
  * Tells the VBC Deployment Cockpit that this build started or finished, so it shows the build as
  * in flight on the matching deployment. Specialised wrapper: sends buildEventMessage(event) to the
  * cockpit's fixed Service Bus topic via serviceBusNotify. Must be called inside a node { } block.

@@ -1,4 +1,6 @@
 /**
+ * Version 1.0.0 - released as tag serviceBusNotify/v1.0.0 (see CHANGELOG.md). Bump both with every change to this file.
+ *
  * Sends an arbitrary message to an Azure Service Bus queue or topic via its REST API. Knows nothing
  * about the receiver. Thin wrapper over webhookNotify; must be called inside a node { } block.
  *

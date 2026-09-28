@@ -1,4 +1,6 @@
 /**
+ * Version 1.0.0 - released as tag buildEventMessage/v1.0.0 (see CHANGELOG.md). Bump both with every change to this file.
+ *
  * Builds a generic "a Jenkins build started/finished" message (schema jenkins-build-event/v1) from
  * the current build, for use as the message of webhookNotify / serviceBusNotify. Receiver-agnostic:
  * it only describes the build.
