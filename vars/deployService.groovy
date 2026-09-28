@@ -1,114 +1,62 @@
 /**
- * The whole protchem service pipeline: build the Docker image with IT's buildDockerImage (vbc-cicd),
- * inject the NuGet feed secret, collect in-image test results, run the OCP arbitrary-UID probe
- * smoke, push, trigger Tower, and notify the VBC Deployment Cockpit. A Jenkinsfile only supplies
- * its configuration. Version 1.0.0 - released as tag deployService/v1.0.0.
+ * Version 1.0.0 - released as tag deployService/v1.0.0 (see CHANGELOG.md). Bump both with every change to this file.
  *
- *   library identifier: 'jenkinstools@deployService/v1.0.0', retriever: modernSCM([$class: 'GitSCMSource',
- *           remote: 'https://github.com/vbc-core-facilities/jenkinstools.git'])
- *
- * Every repo-specific fact (ports, folders, Seq, users, branches, ...) comes from the Jenkinsfile;
- * the only built-in defaults are the two ecosystem-wide build args and the NuGet feed secret below,
- * and each of those can be overridden or removed.
- *
- *   deployService(
- *     imageName        : my_image_name,
- *     dockerFile       : my_dockerfile,
- *     imageNamespace   : my_image_namespace,
- *     pushBranches     : my_observed_git_branches,
- *     tower            : [staging: my_ansible_job_name_staging, production: my_ansible_job_name_prod,
- *                         stagingBranch: 'master'],
- *     buildArgs        : my_docker_build_args,
- *     testResultsFolder: test_results_folder_inside_container,
- *   )
+ * Generic service pipeline wiring on top of IT's buildDockerImage (vbc-cicd), with NO defaults:
+ * nothing is assumed, every value comes from the caller, and every optional feature is off unless
+ * configured. It does the wiring - build args and BuildKit secret injection, build-info reporting,
+ * in-image tests and the OCP probe smoke, push, Tower, cockpit notification, and arbitrary pre/post
+ * actions. For the protchem conventions (names, branches, standard build args, ...) use
+ * deployStandardProteomicsService, which fills in defaults and calls this.
  *
  * Image (required):
- *   imageName          image name, pushed as <imageNamespace>/<imageName>
- *   dockerFile         path to the Dockerfile
- *   imageNamespace     registry namespace, e.g. 'protchem'
- *   pushBranches       branches whose images are pushed, e.g. ['master', 'develop']
- *   dockerContext      (optional) build context; buildDockerImage's default when omitted
+ *   imageName            image name, pushed as <imageNamespace>/<imageName>
+ *   dockerFile           path to the Dockerfile
+ *   imageNamespace       registry namespace
+ *   pushBranches         List of branches whose images are pushed (may be empty)
+ *   dockerContext        optional build context; buildDockerImage's own default when omitted
  *
- * Tower (optional - omit for build-and-push only):
- *   tower              [staging: '<job>', production: '<job>', stagingBranch: '<branch>',
- *                       imageTagVariable: 'app_generic_image_tag']
- *                      staging runs on pushes to stagingBranch (required with staging), production
- *                      on tags with "<imageTagVariable>: <tag>" as extra vars.
- *   towerJobs          raw buildDockerImage tower map; overrides `tower` for unusual setups
+ * Build inputs (optional):
+ *   buildArgs            Map of docker build args, passed as --build-arg NAME="value"; null values skipped
+ *   secrets              List of BuildKit secrets, passed with `docker build --secret` - never as build
+ *                        args or in logs: [id: '<secret id>', credentialsId: '<Jenkins credential>',
+ *                        kind: 'usernamePassword' (its password is the secret) | 'string' (Secret text)]
  *
- * Build args - the Jenkinsfile's buildArgs are the image's build args. Built-in defaults, applied
- * first:
- *     NUGET_REPO_USER          'vbc-proteomics' (the ecosystem's NuGet feed user)
- *     MINVER_VERSION_OVERRIDE  the git tag without a leading 'v', '' when not a tag build
- *   buildArgs          Map of any build args: adds new ones and overrides defaults. A null value
- *                      removes that default, e.g. [MINVER_VERSION_OVERRIDE: null].
- *   defaultBuildArgs   false to use none of the defaults.
+ * Tower (optional; omit for build-and-push only):
+ *   tower                [staging: '<job>', stagingBranch: '<branch>', production: '<job>',
+ *                         imageTagVariable: '<extra var name>']
+ *                        staging runs on pushes to stagingBranch; production runs on tags with
+ *                        "<imageTagVariable>: <tag>" as extra vars. Each job needs its companion value.
+ *   towerJobs            raw buildDockerImage tower map instead of `tower`
  *
- * BuildKit secrets - passed with `docker build --secret`, never as build args or in logs. Built-in
- * default: [id: 'SECRETS-NUGET-REPO-PW', credentialsId: 'vbc-proteomics-github-pat', kind: 'usernamePassword'].
- *   secrets            List of [id: '<secret id>', credentialsId: '<Jenkins credential>',
- *                       kind: 'usernamePassword' (its password is the secret) | 'string' (Secret text)].
- *                      Adds secrets; an entry with a default's id replaces that default.
- *   defaultSecrets     false to use none of the default secrets.
+ * Tests (optional; the test step runs only when one of these is set):
+ *   testResultsFolder    where the image keeps JUnit XML results; they are copied out and published
+ *   testScript           script run inside the image first, with testResultsFolder as its argument
+ *                        (needs testResultsFolder); a non-zero exit marks the build UNSTABLE
+ *   ocpSmoke             true to run the OCP arbitrary-UID probe-mechanics smoke
+ *   ocpSmokeExtraChecks  List of extra shell lines for the smoke (no single quotes)
  *
- * Tests:
- *   tests              false to skip the test closure entirely (no result collection, no smoke)
- *   testResultsFolder  (required unless tests: false) where the image keeps JUnit XML results
- *   testScript         optional script to run inside the image first (gets the results folder as
- *                      its argument); a non-zero exit marks the build UNSTABLE
- *   ocpSmoke           false to skip the OCP probe-mechanics smoke
- *   ocpSmokeExtraChecks  List of extra shell lines for the smoke (no single quotes), e.g.
- *                      ['touch /app/data/.smoke-write-test && rm -f /app/data/.smoke-write-test']
+ * Notification (optional):
+ *   cockpitNotify        [credentialsId: '...'] or [connectionString: '...'] plus any
+ *                        vbcDeploymentCockpitNotify options - a pipeline secret, never passed to the
+ *                        image. Sent on start and finish; a failed notification only warns.
  *
- * Cockpit notification - a pipeline secret, used by Jenkins itself and never passed to the image:
- *   cockpitNotify      default [credentialsId: 'vbc-cockpit-service-bus-send'] (Secret text holding a
- *                      Send-only Service Bus connection string). Override with another
- *                      [credentialsId: ...] or [connectionString: '<value>'], plus any
- *                      vbcDeploymentCockpitNotify options; false to disable. A failed notification,
- *                      including a credential that doesn't exist yet, only warns.
- *
- *   beforeBuild        closure run before the pipeline (inside the cockpit-notified section)
- *   afterBuild         closure run after a successful pipeline
+ * Actions (optional; each a Closure or a List of Closures, run in order):
+ *   beforeBuild          before buildDockerImage
+ *   afterBuild           after a successful buildDockerImage
+ *   afterAlways          after buildDockerImage whatever the outcome (before the 'finished' notification)
  */
 def call(Map config = [:]) {
-    List<String> missing = ['imageName', 'dockerFile', 'imageNamespace', 'pushBranches'].findAll { !config[it] }
-    if (config.tests != false && !config.testResultsFolder) {
-        missing << 'testResultsFolder (or tests: false)'
-    }
-    if (config.tower?.staging && !config.tower?.stagingBranch) {
-        missing << 'tower.stagingBranch'
-    }
-    if (missing) {
-        error("deployService: missing required configuration: ${missing.join(', ')}")
-    }
-
+    validate(config)
     echo "deployService v${toolVersion()} (jenkinstools)"
 
     String tagName = env.TAG_NAME ?: 'latest'
 
-    // ---- docker build args -------------------------------------------------------------------------
-    Map buildArgs = config.defaultBuildArgs == false ? [:] : [
-        NUGET_REPO_USER        : 'vbc-proteomics',
-        MINVER_VERSION_OVERRIDE: env.TAG_NAME ? env.TAG_NAME.replaceFirst(/^v/, '') : '',
-    ]
-    buildArgs += (config.buildArgs ?: [:])
-    buildArgs = buildArgs.findAll { k, v -> v != null } // null removes a default
-
+    // ---- build args + BuildKit secrets --------------------------------------------------------------
+    Map buildArgs = (config.buildArgs ?: [:]).findAll { k, v -> v != null }
     List<String> buildArgParts = buildArgs.collect { k, v -> "--build-arg ${k}=\"${v}\"" }
 
-    // ---- BuildKit secrets --------------------------------------------------------------------------
-    Map<String, Map> secretsById = [:]
-    if (config.defaultSecrets != false) {
-        secretsById['SECRETS-NUGET-REPO-PW'] =
-            [id: 'SECRETS-NUGET-REPO-PW', credentialsId: 'vbc-proteomics-github-pat', kind: 'usernamePassword']
-    }
-    (config.secrets ?: []).each { Map s -> secretsById[s.id as String] = s }
-
     List<String> secretIds = []
-    secretsById.values().each { Map s ->
-        if (!s.id || !s.credentialsId || !(s.kind in ['usernamePassword', 'string'])) {
-            error("deployService: secret needs id, credentialsId and kind 'usernamePassword' or 'string': ${s.findAll { k, v -> k != 'value' }}")
-        }
+    (config.secrets ?: []).each { Map s ->
         String envName = 'secret_' + (s.id as String).replaceAll(/[^A-Za-z0-9_]/, '_')
         def binding = s.kind == 'string'
             ? string(credentialsId: s.credentialsId as String, variable: 'DEPLOY_SECRET')
@@ -122,24 +70,25 @@ def call(Map config = [:]) {
     }
     String extraBuildArgs = buildArgParts.join(' ')
 
-    // ---- tower ------------------------------------------------------------------------------------
+    // ---- tower ----------------------------------------------------------------------------------------
     Map towerJobs = config.towerJobs
     if (towerJobs == null && config.tower) {
-        Map t = [imageTagVariable: 'app_generic_image_tag'] + config.tower
+        Map t = config.tower
         towerJobs = [:]
         if (t.staging) {
-            towerJobs[t.stagingBranch] = [jobName: t.staging]
+            towerJobs[t.stagingBranch as String] = [jobName: t.staging]
         }
         if (t.production) {
             towerJobs.tags = [jobName: t.production, extraVars: "${t.imageTagVariable}: ${tagName}".toString()]
         }
     }
 
-    // ---- build info -------------------------------------------------------------------------------
+    // ---- build info -----------------------------------------------------------------------------------
     node {
         stage('Build info') {
             sh 'docker version'
             sh 'docker buildx version'
+            echo "Image: ${config.imageNamespace}/${config.imageName} from ${config.dockerFile}, pushed on ${config.pushBranches}"
             echo "Build args:\n${buildArgs}"
             echo "Secret ids injected into docker:\n${secretIds}"
             echo "Tower jobs:\n${towerJobs ?: 'none (build and push only)'}"
@@ -151,41 +100,82 @@ def call(Map config = [:]) {
         }
     }
 
-    // ---- pipeline ---------------------------------------------------------------------------------
+    // ---- pipeline -------------------------------------------------------------------------------------
     Map image = [
         imageName            : config.imageName,
         dockerFile           : config.dockerFile,
         pushRegistryNamespace: config.imageNamespace,
         pushBranches         : config.pushBranches,
     ]
-    // Only when there is something to pass, like Jenkinsfiles that never set it.
     if (extraBuildArgs) image.extraBuildArgs = extraBuildArgs
     if (config.dockerContext) image.dockerContext = config.dockerContext
     if (towerJobs) image.tower = towerJobs
-    if (config.tests != false) image.test = testClosure(config, config.testResultsFolder as String)
+    if (config.testResultsFolder || config.testScript || config.ocpSmoke == true) {
+        image.test = testClosure(config)
+    }
 
-    Map cockpit = config.cockpitNotify == false ? null
-        : (config.cockpitNotify ?: [credentialsId: 'vbc-cockpit-service-bus-send'])
-
+    Map cockpit = config.cockpitNotify ?: null
     notifyCockpit(cockpit, 'started')
     try {
-        if (config.beforeBuild) config.beforeBuild()
+        runActions(config.beforeBuild)
         buildDockerImage(image)
-        if (config.afterBuild) config.afterBuild()
+        runActions(config.afterBuild)
     } catch (e) {
         currentBuild.result = 'FAILURE' // so the 'finished' notification reports the real result
         throw e
     } finally {
-        notifyCockpit(cockpit, 'finished')
+        try {
+            runActions(config.afterAlways)
+        } finally {
+            notifyCockpit(cockpit, 'finished')
+        }
     }
 }
 
 // This tool's own version; bump it (and tag deployService/vX.Y.Z) with every change to this file.
 private String toolVersion() { return '1.0.0' }
 
+private void validate(Map config) {
+    List<String> problems = ['imageName', 'dockerFile', 'imageNamespace'].findAll { !config[it] }
+        .collect { "${it} is required".toString() }
+    if (!(config.pushBranches instanceof List)) problems << 'pushBranches is required (a List, may be empty)'
+
+    Map t = config.tower ?: [:]
+    if (t.staging && !t.stagingBranch) problems << 'tower.staging needs tower.stagingBranch'
+    if (t.stagingBranch && !t.staging) problems << 'tower.stagingBranch needs tower.staging'
+    if (t.production && !t.imageTagVariable) problems << 'tower.production needs tower.imageTagVariable'
+    if (config.tower && config.towerJobs) problems << 'pass tower or towerJobs, not both'
+
+    if (config.testScript && !config.testResultsFolder) problems << 'testScript needs testResultsFolder'
+    if (config.ocpSmokeExtraChecks && config.ocpSmoke != true) problems << 'ocpSmokeExtraChecks needs ocpSmoke: true'
+
+    (config.secrets ?: []).each { Map s ->
+        if (!s.id || !s.credentialsId || !(s.kind in ['usernamePassword', 'string'])) {
+            problems << "secret needs id, credentialsId and kind 'usernamePassword' or 'string': ${s}".toString()
+        }
+    }
+    List ids = (config.secrets ?: []).collect { it.id }
+    if (ids.size() != (ids as Set).size()) problems << "duplicate secret ids: ${ids}".toString()
+
+    ['beforeBuild', 'afterBuild', 'afterAlways'].each { name ->
+        def a = config[name]
+        if (a != null && !(a instanceof Closure) && !(a instanceof List && a.every { it instanceof Closure })) {
+            problems << "${name} must be a Closure or a List of Closures".toString()
+        }
+    }
+
+    if (problems) {
+        error("deployService: invalid configuration:\n  - ${problems.join('\n  - ')}")
+    }
+}
+
+private void runActions(def actions) {
+    if (actions == null) return
+    (actions instanceof List ? actions : [actions]).each { Closure action -> action() }
+}
+
 private void notifyCockpit(Map cockpit, String event) {
     if (!cockpit) {
-        echo "deployService: cockpitNotify disabled - skipping '${event}' notification"
         return
     }
     try {
@@ -202,38 +192,43 @@ private void notifyCockpit(Map cockpit, String event) {
 }
 
 // buildDockerImage calls this with (defaultImageName, allBuilds) after building the image.
-private Closure testClosure(Map config, String testResultsFolder) {
+private Closure testClosure(Map config) {
+    String testResultsFolder = config.testResultsFolder as String
     return { defaultImageName, allBuilds ->
-        String resultsInWorkspace = 'test_results'
-        sh "mkdir -p ${resultsInWorkspace}; chmod 777 ${resultsInWorkspace}"
         def built = allBuilds[defaultImageName]
+        String resultsInWorkspace = 'test_results'
 
-        try {
-            built.image.inside() {
-                if (config.testScript) {
-                    int testStatus = sh(script: "${config.testScript} ${testResultsFolder}", returnStatus: true, label: 'in-image tests')
-                    if (testStatus > 0) {
-                        unstable('Test script returned a non-zero exit code.')
+        if (testResultsFolder) {
+            sh "mkdir -p ${resultsInWorkspace}; chmod 777 ${resultsInWorkspace}"
+            try {
+                built.image.inside() {
+                    if (config.testScript) {
+                        int testStatus = sh(script: "${config.testScript} ${testResultsFolder}", returnStatus: true, label: 'in-image tests')
+                        if (testStatus > 0) {
+                            unstable('Test script returned a non-zero exit code.')
+                        }
                     }
+                    sh """
+                    if [ -d ${testResultsFolder} ]; then
+                      cp -r ${testResultsFolder}/. ${env.WORKSPACE}/${resultsInWorkspace}
+                    else
+                      echo "No test results found in ${testResultsFolder}"
+                    fi
+                    """
                 }
-                sh """
-                if [ -d ${testResultsFolder} ]; then
-                  cp -r ${testResultsFolder}/. ${env.WORKSPACE}/${resultsInWorkspace}
-                else
-                  echo "No test results found in ${testResultsFolder}"
-                fi
-                """
+            } catch (exc) {
+                echo "Error occurred while running/collecting in-image tests: ${exc}"
+                unstable('Exception raised while running/collecting in-image tests.')
             }
-        } catch (exc) {
-            echo "Error occurred while running/collecting in-image tests: ${exc}"
-            unstable('Exception raised while running/collecting in-image tests.')
         }
 
-        if (config.ocpSmoke != false) {
+        if (config.ocpSmoke == true) {
             ocpProbeSmoke(built.image.id, config.ocpSmokeExtraChecks ?: [])
         }
 
-        junit skipPublishingChecks: true, allowEmptyResults: true, testResults: "${resultsInWorkspace}/*.xml"
+        if (testResultsFolder) {
+            junit skipPublishingChecks: true, allowEmptyResults: true, testResults: "${resultsInWorkspace}/*.xml"
+        }
     }
 }
 

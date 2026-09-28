@@ -8,7 +8,8 @@ Small, reusable [Jenkins shared library](https://www.jenkins.io/doc/book/pipelin
 | `serviceBusNotify` | Sends any message to an Azure Service Bus queue or topic, given a connection string or a SAS token. |
 | `buildEventMessage` | Builds a generic `jenkins-build-event/v1` message describing the current build. |
 | `vbcDeploymentCockpitNotify` | Sends a build event to the VBC Deployment Cockpit (fixed topic), so the cockpit shows the build as running. |
-| `deployService` | The whole protchem service pipeline, with the Jenkinsfile reduced to its configuration. |
+| `deployService` | Generic service pipeline wiring with **no defaults**: build args and BuildKit secrets, build-info reporting, in-image tests and OCP smoke, push, Tower, cockpit notification, and pre/post actions. |
+| `deployStandardProteomicsService` | The protchem conventions (names, branches, standard build args, secrets, tests, notification) on top of `deployService`, all overridable. A standard service needs only its image, Dockerfile and Tower name. |
 
 **Failures don't break the build by default.** Any notification problem only prints a warning and the build carries on. `failOnError: true` fails the build instead. Aborting a build is never swallowed.
 
@@ -24,13 +25,13 @@ Small, reusable [Jenkins shared library](https://www.jenkins.io/doc/book/pipelin
   - **MINOR:** new optional arguments or behaviour.
   - **PATCH:** fixes that don't change the interface.
   - Changing a tool that others use (e.g. `serviceBusNotify`, which `deployService` uses) releases that tool. The tools that depend on it get a new release only when they want to pick the change up.
-- **A Jenkinsfile pins the tag of the tool it calls:** `library identifier: 'jenkinstools@deployService/v1.0.0', …`.
+- **A Jenkinsfile pins the tag of the tool it calls:** `library identifier: 'jenkinstools@deployStandardProteomicsService/v1.0.0', …`.
   - **How loading works:** Jenkins loads the library at that single git ref, so the tools the pinned tool uses come from the same commit. That snapshot was released and tested together.
   - **Calling several tools directly** means you pin one of their tags; the others are whatever they were at that commit.
   - **Never pin `main`** in a real pipeline. It's only for trying a change on one throwaway branch.
 - **Roll out gradually:** release a new tag of a tool, then bump the pin one Jenkinsfile at a time. Every other pipeline stays locked to the release it already has. To roll back, revert the pin.
 - **Every release updates, in the tagged commit:**
-  - the version in the tool's header, plus its `toolVersion()` where it has one (`deployService` prints it in the build log)
+  - the version in the tool's header, plus its `toolVersion()` where it has one (the deploy tools print it in the build log)
   - the tool's section in `CHANGELOG.md`
 - **Releasing a tool:** commit, then `git tag -a <tool>/vX.Y.Z -m "<tool> vX.Y.Z" && git push origin main <tool>/vX.Y.Z`.
 
@@ -41,72 +42,94 @@ Small, reusable [Jenkins shared library](https://www.jenkins.io/doc/book/pipelin
 The repository is public, so no credential or extra configuration is needed. Pin the tag of the tool you call:
 
 ```groovy
-library identifier: 'jenkinstools@deployService/v1.0.0',
+library identifier: 'jenkinstools@deployStandardProteomicsService/v1.0.0',
         retriever: modernSCM([$class: 'GitSCMSource', remote: 'https://github.com/vbc-core-facilities/jenkinstools.git'])
 ```
 
-## A service Jenkinsfile with `deployService`
+## Service pipelines: two layers
 
-The whole Jenkinsfile. All configuration is defined as variables at the top, and the `deployService` call only wires those variables in. Every repo-specific fact comes from the Jenkinsfile: port, test folder, Seq version (or no Seq at all), users, branches and namespace.
+| | `deployService` | `deployStandardProteomicsService` |
+| --- | --- | --- |
+| **Role** | The wiring. It understands every input and does the build, injection, reporting, testing, push, Tower and notification | The protchem conventions. It fills in defaults and calls `deployService` |
+| **Defaults** | **None.** Everything it uses must be passed; optional features are off unless configured | Namespace, branches, Tower job names, standard build args, NuGet secret, tests, OCP smoke, cockpit notification. All overridable |
+| **Use for** | Services that don't follow the conventions, e.g. proteomicshelper.python | Standard protchem .NET services |
+
+Both are used the same way: all configuration is defined as variables at the top of the Jenkinsfile, and the call only wires those variables in.
+
+### `deployStandardProteomicsService`: a standard service
 
 ```groovy
-library identifier: 'jenkinstools@deployService/v1.0.0',
+library identifier: 'jenkinstools@deployStandardProteomicsService/v1.0.0',
         retriever: modernSCM([$class: 'GitSCMSource', remote: 'https://github.com/vbc-core-facilities/jenkinstools.git'])
 
 // ############################## configuration ##############################
-def my_image_name               = 'hive.frontend'
-def my_dockerfile               = 'Hive.Frontend/Dockerfile'
-def my_image_namespace          = 'protchem'
-def my_observed_git_branches    = ['master', 'develop']
-def my_staging_branch           = 'master'
-def my_ansible_job_name_staging = 'App Protchem Hive Frontend Staging'
-def my_ansible_job_name_prod    = 'App Protchem Hive Frontend Production'
-def test_results_folder_inside_container = '/app/tests/results'
-
-def my_docker_build_args = [
-  'ASPNET_PORT': '8080',
-  'APP_USER': 'app',
-  'APP_GROUP_GID': '0',
-  'TEST_RESULTS_FOLDER': test_results_folder_inside_container,
-  'SEQ_VERSION': '2026.1.17044',   // leave out for an image without Seq
-]
+def my_image_name = 'hive.core'
+def my_dockerfile = 'Hive.Core.WebAPI/Dockerfile'
+def my_tower_name = 'Hive Core' // -> 'App Protchem Hive Core Staging' / '... Production'
 // ###########################################################################
 
+deployStandardProteomicsService(
+  imageName : my_image_name,
+  dockerFile: my_dockerfile,
+  towerName : my_tower_name,
+)
+```
+
+| Convention | Default | Override |
+| --- | --- | --- |
+| `imageNamespace` | `protchem` | any value |
+| `pushBranches` | `['master', 'develop']` | any list |
+| `tower` | staging `App Protchem <towerName> Staging` on `master`; production `App Protchem <towerName> Production` on tags with `app_generic_image_tag: <tag>` | A Map merged over these, e.g. only `[production: '…']`. `false` for no Tower. `towerName` is required unless `tower` is given in full or is `false` |
+| `testResultsFolder` | `/app/tests/results` | any path. `tests: false` means no test step at all |
+| `ocpSmoke` | on | `false` |
+| `buildArgs` | `NUGET_REPO_USER=vbc-proteomics`, `MINVER_VERSION_OVERRIDE=<tag without v>`, `ASPNET_PORT=8080`, `APP_USER=app`, `APP_GROUP_GID=0`, `TEST_RESULTS_FOLDER=<testResultsFolder>`, `SEQ_VERSION=2026.1.17044` | Merged over the defaults; any new names work, and `null` removes one (e.g. `[SEQ_VERSION: null]` for no Seq). `defaultBuildArgs: false` starts empty |
+| `secrets` | `SECRETS-NUGET-REPO-PW` from `vbc-proteomics-github-pat` | Merged by `id`; any new secrets work. `defaultSecrets: false` starts empty |
+| `cockpitNotify` | `[credentialsId: 'vbc-cockpit-service-bus-send']` | Another Map, or `false` |
+
+Anything else is passed straight to `deployService`, e.g. `testScript`, `ocpSmokeExtraChecks`, `dockerContext`, `towerJobs`, and the actions.
+
+### `deployService`: the wiring, no defaults
+
+```groovy
 deployService(
   imageName        : my_image_name,
   dockerFile       : my_dockerfile,
   imageNamespace   : my_image_namespace,
   pushBranches     : my_observed_git_branches,
-  tower            : [staging: my_ansible_job_name_staging, production: my_ansible_job_name_prod,
-                      stagingBranch: my_staging_branch],
+  tower            : [staging: my_tower_staging_job, stagingBranch: my_staging_branch,
+                      production: my_tower_production_job, imageTagVariable: my_tower_image_tag_variable],
   buildArgs        : my_docker_build_args,
-  testResultsFolder: test_results_folder_inside_container,
+  secrets          : my_docker_secrets,
+  testResultsFolder: my_test_results_folder,
+  ocpSmoke         : true,
+  cockpitNotify    : my_cockpit_notify,
+  beforeBuild      : my_before_build,
 )
 ```
 
-`deployService` runs these steps:
-1. Assembles the build args and BuildKit secrets.
-2. Prints build info.
-3. Notifies the cockpit that the build started.
-4. Calls IT's `buildDockerImage`, whose test step collects in-image JUnit results (optionally running `testScript` first) and runs the OCP arbitrary-UID probe smoke.
-5. Pushes the image on `pushBranches`.
-6. Runs the Tower staging job on `stagingBranch` and the production job on tags.
-7. Notifies the cockpit that the build finished, with the real result.
+It runs these steps:
+1. Validates the configuration. Missing or half-configured inputs fail with a list of every problem.
+2. Injects the build args and BuildKit secrets.
+3. Prints build info.
+4. Notifies the cockpit that the build started, if configured.
+5. Runs `beforeBuild`.
+6. Calls IT's `buildDockerImage`. Its test step, if any, runs `testScript`, collects JUnit results from `testResultsFolder`, and runs the OCP smoke when `ocpSmoke: true`.
+7. Pushes the image on `pushBranches`.
+8. Runs the Tower staging job on `stagingBranch` and the production job on tags.
+9. Runs `afterBuild` if the build succeeded, and `afterAlways` in every case.
+10. Notifies the cockpit that the build finished, with the real result.
 
-All options are documented at the top of [`vars/deployService.groovy`](vars/deployService.groovy).
-
-| Option | Default | Meaning |
+| Input | Required | Meaning |
 | --- | --- | --- |
-| `imageName`, `dockerFile`, `imageNamespace`, `pushBranches` | required | Image `<imageNamespace>/<imageName>` built from `dockerFile`, pushed on `pushBranches`. `dockerContext` is optional |
-| `tower` | none (build and push only) | `[staging: '<job>', production: '<job>', stagingBranch: '<branch>', imageTagVariable: 'app_generic_image_tag']`. `stagingBranch` is required with `staging` |
-| `buildArgs` | | The image's build args, any names. They add to or override the defaults; a `null` value removes a default |
-| `defaultBuildArgs` | `NUGET_REPO_USER=vbc-proteomics`, `MINVER_VERSION_OVERRIDE=<tag without v>` | The only built-in build args. `false` uses neither |
-| `secrets` | | Extra BuildKit secrets: `[[id: '…', credentialsId: '…', kind: 'usernamePassword' \| 'string'], …]`. The same `id` replaces a default |
-| `defaultSecrets` | `SECRETS-NUGET-REPO-PW` from `vbc-proteomics-github-pat` | `false` for images without the private NuGet feed |
-| `testResultsFolder` | required unless `tests: false` | Where the image keeps its JUnit XML |
-| `tests` / `testScript` / `ocpSmoke` / `ocpSmokeExtraChecks` | on / none / on / none | Test and smoke behaviour. `tests: false` skips both |
-| `cockpitNotify` | `[credentialsId: 'vbc-cockpit-service-bus-send']` | A *pipeline* secret, never passed to the image. Override with `[credentialsId: …]` or `[connectionString: …]`; `false` disables it. A missing credential only warns |
-| `beforeBuild` / `afterBuild` | | Closures for repo-specific extras |
+| `imageName`, `dockerFile`, `imageNamespace`, `pushBranches` | yes | Image `<imageNamespace>/<imageName>`, pushed on `pushBranches` (a list, which may be empty). `dockerContext` is optional |
+| `buildArgs` | no | Map of any build args |
+| `secrets` | no | BuildKit secrets `[[id: '…', credentialsId: '…', kind: 'usernamePassword' \| 'string'], …]`, never passed as build args or shown in logs |
+| `tower` | no | `[staging, stagingBranch, production, imageTagVariable]`. Each job needs its companion value. `towerJobs` passes a raw `buildDockerImage` map instead |
+| `testResultsFolder`, `testScript`, `ocpSmoke`, `ocpSmokeExtraChecks` | no | The test step runs only when one of these is set. `testScript` needs `testResultsFolder`, and the extra checks need `ocpSmoke: true` |
+| `cockpitNotify` | no | `[credentialsId: …]` or `[connectionString: …]`. A pipeline secret, never passed to the image |
+| `beforeBuild`, `afterBuild`, `afterAlways` | no | A Closure or a List of Closures |
+
+All inputs are documented at the top of [`vars/deployService.groovy`](vars/deployService.groovy) and [`vars/deployStandardProteomicsService.groovy`](vars/deployStandardProteomicsService.groovy).
 
 ## VBC Deployment Cockpit build notifications
 

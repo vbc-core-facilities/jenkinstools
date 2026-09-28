@@ -3,16 +3,27 @@
 Each tool is versioned independently and released as an immutable git tag `<tool>/vMAJOR.MINOR.PATCH`;
 see [Versioning](README.md#versioning). Newest first within each tool.
 
+## deployStandardProteomicsService
+
+### deployStandardProteomicsService/v1.0.0 - 2026-09-29
+First release: the protchem conventions on top of deployService. It sets:
+- namespace, branches, and Tower job names derived from `towerName`
+- the standard build args and the NuGet BuildKit secret
+- the test folder, the OCP smoke, and the cockpit notification
+
+All of them can be overridden, and `null` removes a default build arg.
+
 ## deployService
 
-### deployService/v1.0.0 - 2026-09-28
-First release: the whole protchem service pipeline behind one config map. It covers:
-- build args and the NuGet BuildKit secret
-- in-image tests and the OCP probe smoke
+### deployService/v1.0.0 - 2026-09-29
+First release: generic service pipeline wiring on top of IT's buildDockerImage, with no defaults.
+- build args and arbitrary BuildKit secrets
+- build-info reporting
+- optional in-image tests, test script and OCP smoke
 - push and Tower
-- cockpit notification
-
-A Jenkinsfile becomes configuration only.
+- optional cockpit notification
+- `beforeBuild` / `afterBuild` / `afterAlways` actions
+- configuration validation that lists every problem
 
 ## vbcDeploymentCockpitNotify
 
