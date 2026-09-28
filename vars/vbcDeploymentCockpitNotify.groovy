@@ -3,9 +3,9 @@
  * in flight on the matching deployment. Specialised wrapper: sends buildEventMessage(event) to the
  * cockpit's fixed Service Bus topic via serviceBusNotify. Must be called inside a node { } block.
  *
- *   vbc_deployment_cockpit_notify('started', SB_CONN)
- *   vbc_deployment_cockpit_notify('finished', SB_CONN)
- *   vbc_deployment_cockpit_notify('finished', SB_CONN, [failOnError: true])
+ *   vbcDeploymentCockpitNotify('started', SB_CONN)
+ *   vbcDeploymentCockpitNotify('finished', SB_CONN)
+ *   vbcDeploymentCockpitNotify('finished', SB_CONN, [failOnError: true])
  *
  * connectionString: the Service Bus connection string *value* of a Send-only policy on the topic
  *                   (Endpoint=sb://...;SharedAccessKeyName=...;SharedAccessKey=...;EntityPath=...).
@@ -17,7 +17,7 @@ def call(String event, String connectionString, Map options = [:]) {
     final String topic = 'jenkins-build-events'
 
     if (!(event in ['started', 'finished'])) {
-        String problem = "vbc_deployment_cockpit_notify: event must be 'started' or 'finished', got '${event}'"
+        String problem = "vbcDeploymentCockpitNotify: event must be 'started' or 'finished', got '${event}'"
         if (options.failOnError == true) error(problem)
         echo "WARNING: ${problem} - continuing (failOnError is false)"
         return false

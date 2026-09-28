@@ -7,7 +7,7 @@ Small, reusable [Jenkins shared library](https://www.jenkins.io/doc/book/pipelin
 | `webhookNotify` | Sends any message to any HTTP(S) URL. An optional secret goes into an auth header. |
 | `serviceBusNotify` | Sends any message to an Azure Service Bus queue or topic, given a connection string or a SAS token. |
 | `buildEventMessage` | Builds a generic `jenkins-build-event/v1` message describing the current build. |
-| `vbc_deployment_cockpit_notify` | Sends a build event to the VBC Deployment Cockpit (fixed topic), so the cockpit shows the build as running. |
+| `vbcDeploymentCockpitNotify` | Sends a build event to the VBC Deployment Cockpit (fixed topic), so the cockpit shows the build as running. |
 
 **Failures don't break the build by default.** Any problem only prints a warning and the build carries on. `failOnError: true` fails the build instead. Aborting a build is never swallowed.
 
@@ -19,7 +19,7 @@ The repository is public, so no credential or extra configuration is needed. Pin
 
 ```groovy
 library identifier: 'jenkinstools@v1',
-        retriever: modernSCM([$class: 'GitSCMSource', remote: 'https://github.com/<org>/jenkinstools.git'])
+        retriever: modernSCM([$class: 'GitSCMSource', remote: 'https://github.com/vbc-core-facilities/jenkinstools.git'])
 ```
 
 ## VBC Deployment Cockpit build notifications
@@ -28,14 +28,14 @@ The only input is the connection string of a Send-only policy on the cockpit's t
 
 ```groovy
 withCredentials([string(credentialsId: '<id>', variable: 'COCKPIT_SB')]) {   // or however you get the value
-  node { vbc_deployment_cockpit_notify('started', COCKPIT_SB) }
+  node { vbcDeploymentCockpitNotify('started', COCKPIT_SB) }
   try {
     buildDockerImage([ /* ... existing pipeline, unchanged ... */ ])
   } catch (e) {
     currentBuild.result = 'FAILURE'   // so 'finished' reports the real result
     throw e
   } finally {
-    node { vbc_deployment_cockpit_notify('finished', COCKPIT_SB) }
+    node { vbcDeploymentCockpitNotify('finished', COCKPIT_SB) }
   }
 }
 ```
