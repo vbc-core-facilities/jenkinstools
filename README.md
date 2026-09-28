@@ -47,48 +47,65 @@ library identifier: 'jenkinstools@deployService/v1.0.0',
 
 ## A service Jenkinsfile with `deployService`
 
-The whole Jenkinsfile. All configuration is defined as variables at the top, and the `deployService` call only wires those variables in:
+The whole Jenkinsfile. All configuration is defined as variables at the top, and the `deployService` call only wires those variables in. Every repo-specific fact comes from the Jenkinsfile: port, test folder, Seq version (or no Seq at all), users, branches and namespace.
 
 ```groovy
 library identifier: 'jenkinstools@deployService/v1.0.0',
         retriever: modernSCM([$class: 'GitSCMSource', remote: 'https://github.com/vbc-core-facilities/jenkinstools.git'])
 
 // ############################## configuration ##############################
-def my_image_name                 = 'hive.frontend'
-def my_dockerfile                 = 'Hive.Frontend/Dockerfile'
-def my_ansible_job_name_staging   = 'App Protchem Hive Frontend Staging'
-def my_ansible_job_name_prod      = 'App Protchem Hive Frontend Production'
-def my_cockpit_notify_credentials = 'vbc-cockpit-service-bus-send'
+def my_image_name               = 'hive.frontend'
+def my_dockerfile               = 'Hive.Frontend/Dockerfile'
+def my_image_namespace          = 'protchem'
+def my_observed_git_branches    = ['master', 'develop']
+def my_staging_branch           = 'master'
+def my_ansible_job_name_staging = 'App Protchem Hive Frontend Staging'
+def my_ansible_job_name_prod    = 'App Protchem Hive Frontend Production'
+def test_results_folder_inside_container = '/app/tests/results'
+
+def my_docker_build_args = [
+  'ASPNET_PORT': '8080',
+  'APP_USER': 'app',
+  'APP_GROUP_GID': '0',
+  'TEST_RESULTS_FOLDER': test_results_folder_inside_container,
+  'SEQ_VERSION': '2026.1.17044',   // leave out for an image without Seq
+]
 // ###########################################################################
 
 deployService(
-  imageName    : my_image_name,
-  dockerFile   : my_dockerfile,
-  tower        : [staging: my_ansible_job_name_staging, production: my_ansible_job_name_prod],
-  cockpitNotify: [credentialsId: my_cockpit_notify_credentials],
+  imageName        : my_image_name,
+  dockerFile       : my_dockerfile,
+  imageNamespace   : my_image_namespace,
+  pushBranches     : my_observed_git_branches,
+  tower            : [staging: my_ansible_job_name_staging, production: my_ansible_job_name_prod,
+                      stagingBranch: my_staging_branch],
+  buildArgs        : my_docker_build_args,
+  testResultsFolder: test_results_folder_inside_container,
 )
 ```
 
 `deployService` runs these steps:
-1. Assembles the default build args plus `buildArgs`, and passes the NuGet PAT as a BuildKit secret.
+1. Assembles the build args and BuildKit secrets.
 2. Prints build info.
 3. Notifies the cockpit that the build started.
 4. Calls IT's `buildDockerImage`, whose test step collects in-image JUnit results (optionally running `testScript` first) and runs the OCP arbitrary-UID probe smoke.
 5. Pushes the image on `pushBranches`.
-6. Runs the Tower staging job on `master` and the production job on tags.
+6. Runs the Tower staging job on `stagingBranch` and the production job on tags.
 7. Notifies the cockpit that the build finished, with the real result.
 
-All options are documented at the top of [`vars/deployService.groovy`](vars/deployService.groovy). The common ones:
+All options are documented at the top of [`vars/deployService.groovy`](vars/deployService.groovy).
 
 | Option | Default | Meaning |
 | --- | --- | --- |
-| `imageName`, `dockerFile` | required | Image `protchem/<imageName>` built from `dockerFile` |
-| `tower` | none | `[staging: '<job>', production: '<job>', stagingBranch: 'master', imageTagVariable: 'app_generic_image_tag']` |
-| `pushBranches` | `['master', 'develop']` | Branches whose images are pushed |
-| `buildArgs` | | Extra or overriding build args. `defaultBuildArgs: false` starts from an empty set |
-| `nugetSecret` | `vbc-proteomics-github-pat` → `SECRETS-NUGET-REPO-PW` | `false` for images without the private NuGet feed |
+| `imageName`, `dockerFile`, `imageNamespace`, `pushBranches` | required | Image `<imageNamespace>/<imageName>` built from `dockerFile`, pushed on `pushBranches`. `dockerContext` is optional |
+| `tower` | none (build and push only) | `[staging: '<job>', production: '<job>', stagingBranch: '<branch>', imageTagVariable: 'app_generic_image_tag']`. `stagingBranch` is required with `staging` |
+| `buildArgs` | | The image's build args, any names. They add to or override the defaults; a `null` value removes a default |
+| `defaultBuildArgs` | `NUGET_REPO_USER=vbc-proteomics`, `MINVER_VERSION_OVERRIDE=<tag without v>` | The only built-in build args. `false` uses neither |
+| `secrets` | | Extra BuildKit secrets: `[[id: '…', credentialsId: '…', kind: 'usernamePassword' \| 'string'], …]`. The same `id` replaces a default |
+| `defaultSecrets` | `SECRETS-NUGET-REPO-PW` from `vbc-proteomics-github-pat` | `false` for images without the private NuGet feed |
+| `testResultsFolder` | required unless `tests: false` | Where the image keeps its JUnit XML |
 | `tests` / `testScript` / `ocpSmoke` / `ocpSmokeExtraChecks` | on / none / on / none | Test and smoke behaviour. `tests: false` skips both |
-| `cockpitNotify` | skipped | `[credentialsId: '…']` or `[connectionString: '…']` |
+| `cockpitNotify` | `[credentialsId: 'vbc-cockpit-service-bus-send']` | A *pipeline* secret, never passed to the image. Override with `[credentialsId: …]` or `[connectionString: …]`; `false` disables it. A missing credential only warns |
 | `beforeBuild` / `afterBuild` | | Closures for repo-specific extras |
 
 ## VBC Deployment Cockpit build notifications

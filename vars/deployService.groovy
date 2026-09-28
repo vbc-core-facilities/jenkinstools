@@ -7,50 +7,77 @@
  *   library identifier: 'jenkinstools@deployService/v1.0.0', retriever: modernSCM([$class: 'GitSCMSource',
  *           remote: 'https://github.com/vbc-core-facilities/jenkinstools.git'])
  *
+ * Every repo-specific fact (ports, folders, Seq, users, branches, ...) comes from the Jenkinsfile;
+ * the only built-in defaults are the two ecosystem-wide build args and the NuGet feed secret below,
+ * and each of those can be overridden or removed.
+ *
  *   deployService(
- *     imageName : 'hive.frontend',
- *     dockerFile: 'Hive.Frontend/Dockerfile',
- *     tower     : [staging: 'App Protchem Hive Frontend Staging', production: 'App Protchem Hive Frontend Production'],
+ *     imageName        : my_image_name,
+ *     dockerFile       : my_dockerfile,
+ *     imageNamespace   : my_image_namespace,
+ *     pushBranches     : my_observed_git_branches,
+ *     tower            : [staging: my_ansible_job_name_staging, production: my_ansible_job_name_prod,
+ *                         stagingBranch: 'master'],
+ *     buildArgs        : my_docker_build_args,
+ *     testResultsFolder: test_results_folder_inside_container,
  *   )
  *
- * Configuration (all optional unless marked):
- *   imageName          (required) image name, pushed as <imageNamespace>/<imageName>
- *   dockerFile         (required) path to the Dockerfile
- *   dockerContext      build context, default '.'
- *   imageNamespace     default 'protchem'
- *   pushBranches       branches whose images are pushed, default ['master', 'develop']
+ * Image (required):
+ *   imageName          image name, pushed as <imageNamespace>/<imageName>
+ *   dockerFile         path to the Dockerfile
+ *   imageNamespace     registry namespace, e.g. 'protchem'
+ *   pushBranches       branches whose images are pushed, e.g. ['master', 'develop']
+ *   dockerContext      (optional) build context; buildDockerImage's default when omitted
  *
- *   tower              [staging: '<job>', production: '<job>', stagingBranch: 'master',
+ * Tower (optional - omit for build-and-push only):
+ *   tower              [staging: '<job>', production: '<job>', stagingBranch: '<branch>',
  *                       imageTagVariable: 'app_generic_image_tag']
- *                      staging runs on pushes to stagingBranch, production on tags with
- *                      "<imageTagVariable>: <tag>" as extra vars. Omit for build-and-push only.
+ *                      staging runs on pushes to stagingBranch (required with staging), production
+ *                      on tags with "<imageTagVariable>: <tag>" as extra vars.
  *   towerJobs          raw buildDockerImage tower map; overrides `tower` for unusual setups
  *
- *   buildArgs          Map of docker build args, merged over the defaults below
- *   defaultBuildArgs   false to start from an empty set instead of:
- *                        NUGET_REPO_USER=vbc-proteomics, MINVER_VERSION_OVERRIDE=<tag without v>,
- *                        ASPNET_PORT=8080, APP_USER=app, APP_GROUP_GID=0,
- *                        TEST_RESULTS_FOLDER=<testResultsFolder>, SEQ_VERSION=<pinned below>
- *   nugetSecret        [credentialsId: 'vbc-proteomics-github-pat', secretId: 'SECRETS-NUGET-REPO-PW'];
- *                      the PAT is passed as a BuildKit secret, never as a build arg. false to skip.
+ * Build args - the Jenkinsfile's buildArgs are the image's build args. Built-in defaults, applied
+ * first:
+ *     NUGET_REPO_USER          'vbc-proteomics' (the ecosystem's NuGet feed user)
+ *     MINVER_VERSION_OVERRIDE  the git tag without a leading 'v', '' when not a tag build
+ *   buildArgs          Map of any build args: adds new ones and overrides defaults. A null value
+ *                      removes that default, e.g. [MINVER_VERSION_OVERRIDE: null].
+ *   defaultBuildArgs   false to use none of the defaults.
  *
+ * BuildKit secrets - passed with `docker build --secret`, never as build args or in logs. Built-in
+ * default: [id: 'SECRETS-NUGET-REPO-PW', credentialsId: 'vbc-proteomics-github-pat', kind: 'usernamePassword'].
+ *   secrets            List of [id: '<secret id>', credentialsId: '<Jenkins credential>',
+ *                       kind: 'usernamePassword' (its password is the secret) | 'string' (Secret text)].
+ *                      Adds secrets; an entry with a default's id replaces that default.
+ *   defaultSecrets     false to use none of the default secrets.
+ *
+ * Tests:
  *   tests              false to skip the test closure entirely (no result collection, no smoke)
- *   testResultsFolder  where the image keeps JUnit XML results, default '/app/tests/results'
+ *   testResultsFolder  (required unless tests: false) where the image keeps JUnit XML results
  *   testScript         optional script to run inside the image first (gets the results folder as
  *                      its argument); a non-zero exit marks the build UNSTABLE
  *   ocpSmoke           false to skip the OCP probe-mechanics smoke
  *   ocpSmokeExtraChecks  List of extra shell lines for the smoke (no single quotes), e.g.
  *                      ['touch /app/data/.smoke-write-test && rm -f /app/data/.smoke-write-test']
  *
- *   cockpitNotify      [credentialsId: '<Secret text id>'] or [connectionString: '<value>'] -
- *                      a Send-only Service Bus connection string; omit to skip. Passed to
- *                      vbcDeploymentCockpitNotify; a failed notification only warns.
+ * Cockpit notification - a pipeline secret, used by Jenkins itself and never passed to the image:
+ *   cockpitNotify      default [credentialsId: 'vbc-cockpit-service-bus-send'] (Secret text holding a
+ *                      Send-only Service Bus connection string). Override with another
+ *                      [credentialsId: ...] or [connectionString: '<value>'], plus any
+ *                      vbcDeploymentCockpitNotify options; false to disable. A failed notification,
+ *                      including a credential that doesn't exist yet, only warns.
  *
  *   beforeBuild        closure run before the pipeline (inside the cockpit-notified section)
  *   afterBuild         closure run after a successful pipeline
  */
 def call(Map config = [:]) {
-    def missing = ['imageName', 'dockerFile'].findAll { !config[it] }
+    List<String> missing = ['imageName', 'dockerFile', 'imageNamespace', 'pushBranches'].findAll { !config[it] }
+    if (config.tests != false && !config.testResultsFolder) {
+        missing << 'testResultsFolder (or tests: false)'
+    }
+    if (config.tower?.staging && !config.tower?.stagingBranch) {
+        missing << 'tower.stagingBranch'
+    }
     if (missing) {
         error("deployService: missing required configuration: ${missing.join(', ')}")
     }
@@ -58,41 +85,47 @@ def call(Map config = [:]) {
     echo "deployService v${toolVersion()} (jenkinstools)"
 
     String tagName = env.TAG_NAME ?: 'latest'
-    String testResultsFolder = config.testResultsFolder ?: '/app/tests/results'
 
-    // ---- docker build args + BuildKit secrets ----------------------------------------------------
+    // ---- docker build args -------------------------------------------------------------------------
     Map buildArgs = config.defaultBuildArgs == false ? [:] : [
         NUGET_REPO_USER        : 'vbc-proteomics',
         MINVER_VERSION_OVERRIDE: env.TAG_NAME ? env.TAG_NAME.replaceFirst(/^v/, '') : '',
-        ASPNET_PORT            : '8080',
-        APP_USER               : 'app',
-        APP_GROUP_GID          : '0',
-        TEST_RESULTS_FOLDER    : testResultsFolder,
-        // pinned deliberately; ':latest' would make rebuilds non-reproducible
-        SEQ_VERSION            : '2026.1.17044',
     ]
     buildArgs += (config.buildArgs ?: [:])
+    buildArgs = buildArgs.findAll { k, v -> v != null } // null removes a default
 
     List<String> buildArgParts = buildArgs.collect { k, v -> "--build-arg ${k}=\"${v}\"" }
-    List<String> secretIds = []
 
-    Map nuget = config.nugetSecret == false ? null :
-        ([credentialsId: 'vbc-proteomics-github-pat', secretId: 'SECRETS-NUGET-REPO-PW'] + (config.nugetSecret ?: [:]))
-    if (nuget) {
-        String envName = 'secret_' + nuget.secretId.replace('-', '_')
-        withCredentials([usernamePassword(credentialsId: nuget.credentialsId, usernameVariable: 'NUGET_USER', passwordVariable: 'NUGET_PAT')]) {
-            // BuildKit reads the secret from this env var, so it never appears in build args or logs.
-            env."${envName}" = "${NUGET_PAT}"
+    // ---- BuildKit secrets --------------------------------------------------------------------------
+    Map<String, Map> secretsById = [:]
+    if (config.defaultSecrets != false) {
+        secretsById['SECRETS-NUGET-REPO-PW'] =
+            [id: 'SECRETS-NUGET-REPO-PW', credentialsId: 'vbc-proteomics-github-pat', kind: 'usernamePassword']
+    }
+    (config.secrets ?: []).each { Map s -> secretsById[s.id as String] = s }
+
+    List<String> secretIds = []
+    secretsById.values().each { Map s ->
+        if (!s.id || !s.credentialsId || !(s.kind in ['usernamePassword', 'string'])) {
+            error("deployService: secret needs id, credentialsId and kind 'usernamePassword' or 'string': ${s.findAll { k, v -> k != 'value' }}")
         }
-        buildArgParts << "--secret id=${nuget.secretId},type=env,env=${envName}"
-        secretIds << nuget.secretId
+        String envName = 'secret_' + (s.id as String).replaceAll(/[^A-Za-z0-9_]/, '_')
+        def binding = s.kind == 'string'
+            ? string(credentialsId: s.credentialsId as String, variable: 'DEPLOY_SECRET')
+            : usernamePassword(credentialsId: s.credentialsId as String, usernameVariable: 'DEPLOY_SECRET_USER', passwordVariable: 'DEPLOY_SECRET')
+        withCredentials([binding]) {
+            // BuildKit reads the secret from this env var, so it never appears in build args or logs.
+            env."${envName}" = "${DEPLOY_SECRET}"
+        }
+        buildArgParts << "--secret id=${s.id},type=env,env=${envName}"
+        secretIds << (s.id as String)
     }
     String extraBuildArgs = buildArgParts.join(' ')
 
     // ---- tower ------------------------------------------------------------------------------------
     Map towerJobs = config.towerJobs
     if (towerJobs == null && config.tower) {
-        Map t = [stagingBranch: 'master', imageTagVariable: 'app_generic_image_tag'] + config.tower
+        Map t = [imageTagVariable: 'app_generic_image_tag'] + config.tower
         towerJobs = [:]
         if (t.staging) {
             towerJobs[t.stagingBranch] = [jobName: t.staging]
@@ -122,16 +155,19 @@ def call(Map config = [:]) {
     Map image = [
         imageName            : config.imageName,
         dockerFile           : config.dockerFile,
-        pushRegistryNamespace: config.imageNamespace ?: 'protchem',
-        pushBranches         : config.pushBranches ?: ['master', 'develop'],
+        pushRegistryNamespace: config.imageNamespace,
+        pushBranches         : config.pushBranches,
     ]
     // Only when there is something to pass, like Jenkinsfiles that never set it.
     if (extraBuildArgs) image.extraBuildArgs = extraBuildArgs
     if (config.dockerContext) image.dockerContext = config.dockerContext
     if (towerJobs) image.tower = towerJobs
-    if (config.tests != false) image.test = testClosure(config, testResultsFolder)
+    if (config.tests != false) image.test = testClosure(config, config.testResultsFolder as String)
 
-    notifyCockpit(config.cockpitNotify, 'started')
+    Map cockpit = config.cockpitNotify == false ? null
+        : (config.cockpitNotify ?: [credentialsId: 'vbc-cockpit-service-bus-send'])
+
+    notifyCockpit(cockpit, 'started')
     try {
         if (config.beforeBuild) config.beforeBuild()
         buildDockerImage(image)
@@ -140,7 +176,7 @@ def call(Map config = [:]) {
         currentBuild.result = 'FAILURE' // so the 'finished' notification reports the real result
         throw e
     } finally {
-        notifyCockpit(config.cockpitNotify, 'finished')
+        notifyCockpit(cockpit, 'finished')
     }
 }
 
@@ -149,7 +185,7 @@ private String toolVersion() { return '1.0.0' }
 
 private void notifyCockpit(Map cockpit, String event) {
     if (!cockpit) {
-        echo "deployService: cockpitNotify not configured - skipping '${event}' notification"
+        echo "deployService: cockpitNotify disabled - skipping '${event}' notification"
         return
     }
     try {
