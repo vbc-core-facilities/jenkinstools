@@ -1,115 +1,182 @@
 /**
- * Version 1.0.0 - released as tag deployStandardProteomicsService/v1.0.0 (see CHANGELOG.md). Bump both with every change to this file.
+ * Version 2.0.0 - released as tag deployStandardProteomicsService/v2.0.0 (see CHANGELOG.md). Bump both with every change to this file.
  *
  * The VBC proteomics (protchem) service conventions on top of deployService: it fills in the
- * standard names, branches, build args, secrets, tests and notification, so a standard service's
- * Jenkinsfile needs only a few inputs. Every convention can be overridden; anything not listed
- * here is passed straight through to deployService (e.g. testScript, dockerContext, towerJobs,
- * beforeBuild / afterBuild / afterAlways).
+ * standard namespace, branches, build args, secrets, tests and notification, so a standard
+ * service's Jenkinsfile needs only a few inputs. Every convention can be overridden; anything not
+ * listed here is passed straight through to deployService (e.g. towerJobs, beforeBuild /
+ * afterBuild / afterAlways).
  *
  * Required:
- *   imageName            image name, pushed as protchem/<imageName>
- *   dockerFile           path to the Dockerfile
+ *   imageName               image name, pushed as protchem/<imageName>
+ *   dockerFile              path to the Dockerfile
+ *   dockerContext           docker build context, e.g. './' (never left to buildDockerImage's default)
  *   towerStagingJobName     the Tower staging job, exactly as named in Tower
  *   towerProductionJobName  the Tower production job, exactly as named in Tower
  *                           Both are mapped by hand (IT names them); not needed with tower: false.
  *
+ * Optional:
+ *   dockerHttpPort          the port the container listens on, passed as build arg APP_PORT (the
+ *                           stack-neutral name from the OCP deployment standard). The Dockerfile maps
+ *                           it to its stack, e.g. ASPNETCORE_HTTP_PORTS for Kestrel. null or omitted:
+ *                           no build arg, the Dockerfile's own default applies.
+ *
  * Conventions (defaults) and how to override them:
- *   imageNamespace       'protchem'
- *   pushBranches         ['master', 'develop']
- *   tower                [stagingBranch: 'master', imageTagVariable: 'app_generic_image_tag'];
- *                        a Map is merged over these; false = no Tower (build and push only).
- *                        Staging runs on pushes to stagingBranch, production on tags.
- *   testResultsFolder    '/app/tests/results' (tests: false for no test step at all)
- *   ocpSmoke             true
- *   buildArgs            merged over the standard build args below; a null value removes one:
- *                          NUGET_REPO_USER          'vbc-proteomics'
- *                          MINVER_VERSION_OVERRIDE  git tag without a leading 'v' ('' if not a tag build)
- *                          ASPNET_PORT              '8080'
- *                          APP_USER                 'app'
- *                          APP_GROUP_GID            '0'
- *                          TEST_RESULTS_FOLDER      <testResultsFolder>
- *                          SEQ_VERSION              '2026.1.17044' (pinned; [SEQ_VERSION: null] for no Seq)
- *   defaultBuildArgs     false to start from no standard build args
- *   secrets              merged by id over the standard BuildKit secret:
- *                          [id: 'SECRETS-NUGET-REPO-PW', credentialsId: 'vbc-proteomics-github-pat',
- *                           kind: 'usernamePassword']
- *   defaultSecrets       false to start from no standard secrets
- *   cockpitNotify        [credentialsId: 'vbc-cockpit-service-bus-send']; a Map replaces it; false = off
+ *   imageNamespace          'protchem'
+ *   pushBranches            ['master', 'develop']
+ *   tower                   [stagingBranch: 'master', imageTagVariable: 'app_generic_image_tag'];
+ *                           a Map overrides either; false = no Tower (build and push only).
+ *                           Staging runs on pushes to stagingBranch, production on tags.
+ *   testResultsFolder       '/app/tests/results' (tests: false for no test step at all)
+ *   testScript              none; passed through when tests are on
+ *   ocpSmoke                true
+ *   ocpSmokeExtraChecks     none; passed through when tests are on
+ *   buildArgs               merged over the standard build args below; a null value removes one:
+ *                             NUGET_REPO_USER          'vbc-proteomics'
+ *                             MINVER_VERSION_OVERRIDE  git tag without a leading 'v' ('' if not a tag build)
+ *                             APP_USER                 'app'
+ *                             APP_GROUP_GID            '0'
+ *                             TEST_RESULTS_FOLDER      <testResultsFolder>
+ *                             SEQ_VERSION              '2026.1.17044' (pinned; [SEQ_VERSION: null] for no Seq)
+ *   defaultBuildArgs        false to start from no standard build args (dockerHttpPort still applies)
+ *   secrets                 merged by id over the standard BuildKit secret:
+ *                             [id: 'SECRETS-NUGET-REPO-PW', credentialsId: 'vbc-proteomics-github-pat',
+ *                              kind: 'usernamePassword']
+ *   defaultSecrets          false to start from no standard secrets
+ *   cockpitNotify           [credentialsId: 'vbc-cockpit-service-bus-send']; a Map replaces it; false = off
  */
 def call(Map config = [:]) {
     echo "deployStandardProteomicsService v${toolVersion()} (jenkinstools)"
+    failOnInvalidConfiguration(config)
 
-    List<String> problems = ['imageName', 'dockerFile'].findAll { !config[it] }.collect { "${it} is required".toString() }
-    if (config.tower != false && !config.towerJobs) {
-        ['towerStagingJobName', 'towerProductionJobName'].findAll { !config[it] }.each {
-            problems << "${it} is required (or tower: false for no Tower)".toString()
-        }
-    }
-    if (config.tower instanceof Map && (config.tower.staging || config.tower.production)) {
-        problems << 'set the Tower jobs with towerStagingJobName / towerProductionJobName, not tower.staging / tower.production'
-    }
-    if (problems) {
-        error("deployStandardProteomicsService: invalid configuration:\n  - ${problems.join('\n  - ')}")
-    }
+    boolean runTests = config.tests != false
+    String testResultsFolder = runTests ? (config.testResultsFolder ?: '/app/tests/results') : null
 
-    boolean tests = config.tests != false
-    String testResultsFolder = tests ? (config.testResultsFolder ?: '/app/tests/results') : null
+    Map buildArguments = resolveBuildArguments(config, testResultsFolder)
+    List<Map> buildKitSecrets = resolveBuildKitSecrets(config)
+    Map tower = resolveTower(config)
+    Map cockpitNotification = resolveCockpitNotification(config)
 
-    // ---- build args: standard set, then the repo's additions/overrides; null removes ----------------
-    Map buildArgs = config.defaultBuildArgs == false ? [:] : [
+    Map conventionParameters = [
+        imageNamespace     : config.imageNamespace ?: 'protchem',
+        pushBranches       : config.pushBranches != null ? config.pushBranches : ['master', 'develop'],
+        buildArgs          : buildArguments,
+        secrets            : buildKitSecrets,
+        tower              : tower,
+        testResultsFolder  : testResultsFolder,
+        testScript         : runTests ? config.testScript : null,
+        ocpSmoke           : runTests && config.ocpSmoke != false,
+        ocpSmokeExtraChecks: runTests ? config.ocpSmokeExtraChecks : null,
+        cockpitNotify      : cockpitNotification,
+    ]
+    List<String> handledInputNames = [
+        'imageNamespace',
+        'pushBranches',
+        'dockerHttpPort',
+        'buildArgs',
+        'defaultBuildArgs',
+        'secrets',
+        'defaultSecrets',
+        'tower',
+        'towerStagingJobName',
+        'towerProductionJobName',
+        'tests',
+        'testResultsFolder',
+        'testScript',
+        'ocpSmoke',
+        'ocpSmokeExtraChecks',
+        'cockpitNotify',
+    ]
+    Map passThroughParameters = config.findAll { inputName, inputValue -> !(inputName in handledInputNames) }
+
+    Map deployServiceParameters = (passThroughParameters + conventionParameters).findAll { parameterName, parameterValue ->
+        parameterValue != null
+    }
+    deployService(deployServiceParameters)
+}
+
+// This tool's own version; bump it (and tag deployStandardProteomicsService/vX.Y.Z) with every change to this file.
+private String toolVersion() { return '2.0.0' }
+
+private void failOnInvalidConfiguration(Map config) {
+    List<String> requiredInputNames = [
+        'imageName',
+        'dockerFile',
+        'dockerContext',
+    ]
+    boolean usesTowerConvention = config.tower != false && !config.towerJobs
+    List<String> towerJobInputNames = usesTowerConvention ? ['towerStagingJobName', 'towerProductionJobName'] : []
+
+    List<String> missingInputNames = requiredInputNames.findAll { String inputName -> !config[inputName] }
+    List<String> missingTowerJobInputNames = towerJobInputNames.findAll { String inputName -> !config[inputName] }
+
+    List<String> missingInputProblems = missingInputNames.collect { String inputName ->
+        "${inputName} is required".toString()
+    }
+    List<String> missingTowerJobProblems = missingTowerJobInputNames.collect { String inputName ->
+        "${inputName} is required (or tower: false for no Tower)".toString()
+    }
+    boolean towerJobsInTowerMap = config.tower instanceof Map && (config.tower.staging || config.tower.production)
+    List<String> towerMapProblems = towerJobsInTowerMap
+        ? ['set the Tower jobs with towerStagingJobName / towerProductionJobName, not tower.staging / tower.production']
+        : []
+
+    List<String> problems = missingInputProblems + missingTowerJobProblems + towerMapProblems
+    if (!problems.isEmpty()) {
+        String problemList = problems.join('\n  - ')
+        error("deployStandardProteomicsService: invalid configuration:\n  - ${problemList}")
+    }
+}
+
+// Standard build args, then APP_PORT from dockerHttpPort, then the repo's own; a null value removes one.
+private Map resolveBuildArguments(Map config, String testResultsFolder) {
+    String minVerVersion = env.TAG_NAME ? env.TAG_NAME.replaceFirst(/^v/, '') : ''
+    Map standardBuildArguments = config.defaultBuildArgs == false ? [:] : [
         NUGET_REPO_USER        : 'vbc-proteomics',
-        MINVER_VERSION_OVERRIDE: env.TAG_NAME ? env.TAG_NAME.replaceFirst(/^v/, '') : '',
-        ASPNET_PORT            : '8080',
+        MINVER_VERSION_OVERRIDE: minVerVersion,
         APP_USER               : 'app',
         APP_GROUP_GID          : '0',
         TEST_RESULTS_FOLDER    : testResultsFolder,
         // pinned deliberately; ':latest' would make rebuilds non-reproducible
         SEQ_VERSION            : '2026.1.17044',
     ]
-    buildArgs += (config.buildArgs ?: [:])
-    buildArgs = buildArgs.findAll { k, v -> v != null }
+    Map portBuildArguments = config.dockerHttpPort != null ? [APP_PORT: config.dockerHttpPort as String] : [:]
+    Map repositoryBuildArguments = config.buildArgs ?: [:]
 
-    // ---- secrets: standard set, then the repo's, merged by id -----------------------------------------
-    Map<String, Map> secretsById = [:]
-    if (config.defaultSecrets != false) {
-        secretsById['SECRETS-NUGET-REPO-PW'] =
-            [id: 'SECRETS-NUGET-REPO-PW', credentialsId: 'vbc-proteomics-github-pat', kind: 'usernamePassword']
-    }
-    (config.secrets ?: []).each { Map s -> secretsById[s.id as String] = s }
-
-    // ---- tower: the hand-mapped job names + branch / tag-variable conventions ---------------------------
-    Map tower = null
-    if (config.tower != false && !config.towerJobs) {
-        tower = [stagingBranch: 'master', imageTagVariable: 'app_generic_image_tag'] +
-                (config.tower instanceof Map ? config.tower : [:]) +
-                [staging: config.towerStagingJobName, production: config.towerProductionJobName]
-    }
-
-    // ---- everything else passes through ----------------------------------------------------------------
-    Set<String> handled = ['towerStagingJobName', 'towerProductionJobName', 'tower', 'tests', 'testResultsFolder', 'buildArgs', 'defaultBuildArgs',
-                           'secrets', 'defaultSecrets', 'imageNamespace', 'pushBranches', 'ocpSmoke', 'cockpitNotify'] as Set
-    Map passThrough = config.findAll { k, v -> !(k in handled) }
-
-    Map resolved = passThrough + [
-        imageNamespace: config.imageNamespace ?: 'protchem',
-        pushBranches  : config.pushBranches != null ? config.pushBranches : ['master', 'develop'],
-        buildArgs     : buildArgs,
-        secrets       : secretsById.values() as List,
-        ocpSmoke      : tests && config.ocpSmoke != false,
-    ]
-    if (tower) resolved.tower = tower
-    if (testResultsFolder) resolved.testResultsFolder = testResultsFolder
-    if (!tests) {
-        resolved.remove('testScript')
-        resolved.remove('ocpSmokeExtraChecks')
-    }
-    if (config.cockpitNotify != false) {
-        resolved.cockpitNotify = config.cockpitNotify ?: [credentialsId: 'vbc-cockpit-service-bus-send']
-    }
-
-    deployService(resolved)
+    Map mergedBuildArguments = standardBuildArguments + portBuildArguments + repositoryBuildArguments
+    return mergedBuildArguments.findAll { argumentName, argumentValue -> argumentValue != null }
 }
 
-// This tool's own version; bump it (and tag deployStandardProteomicsService/vX.Y.Z) with every change to this file.
-private String toolVersion() { return '1.0.0' }
+// The standard NuGet feed secret, replaced by a repo secret with the same id; repo secrets added.
+private List<Map> resolveBuildKitSecrets(Map config) {
+    List<Map> standardSecrets = config.defaultSecrets == false ? [] : [
+        [id: 'SECRETS-NUGET-REPO-PW', credentialsId: 'vbc-proteomics-github-pat', kind: 'usernamePassword'],
+    ]
+    List<Map> repositorySecrets = config.secrets ?: []
+    List<String> repositorySecretIds = repositorySecrets.collect { Map repositorySecret -> repositorySecret.id as String }
+    List<Map> keptStandardSecrets = standardSecrets.findAll { Map standardSecret ->
+        !(standardSecret.id in repositorySecretIds)
+    }
+    return keptStandardSecrets + repositorySecrets
+}
+
+private Map resolveTower(Map config) {
+    boolean usesTowerConvention = config.tower != false && !config.towerJobs
+    if (!usesTowerConvention) {
+        return null
+    }
+    Map towerOverrides = config.tower instanceof Map ? config.tower : [:]
+    return [
+        staging         : config.towerStagingJobName,
+        stagingBranch   : towerOverrides.stagingBranch ?: 'master',
+        production      : config.towerProductionJobName,
+        imageTagVariable: towerOverrides.imageTagVariable ?: 'app_generic_image_tag',
+    ]
+}
+
+private Map resolveCockpitNotification(Map config) {
+    if (config.cockpitNotify == false) {
+        return null
+    }
+    return config.cockpitNotify ?: [credentialsId: 'vbc-cockpit-service-bus-send']
+}

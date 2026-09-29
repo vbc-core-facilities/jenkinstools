@@ -25,7 +25,7 @@ Small, reusable [Jenkins shared library](https://www.jenkins.io/doc/book/pipelin
   - **MINOR:** new optional arguments or behaviour.
   - **PATCH:** fixes that don't change the interface.
   - Changing a tool that others use (e.g. `serviceBusNotify`, which `deployService` uses) releases that tool. The tools that depend on it get a new release only when they want to pick the change up.
-- **A Jenkinsfile pins the tag of the tool it calls:** `library identifier: 'jenkinstools@deployStandardProteomicsService/v1.0.0', …`.
+- **A Jenkinsfile pins the tag of the tool it calls:** `library identifier: 'jenkinstools@deployStandardProteomicsService/v2.0.0', …`.
   - **How loading works:** Jenkins loads the library at that single git ref, so the tools the pinned tool uses come from the same commit. That snapshot was released and tested together.
   - **Calling several tools directly** means you pin one of their tags; the others are whatever they were at that commit.
   - **Never pin `main`** in a real pipeline. It's only for trying a change on one throwaway branch.
@@ -42,7 +42,7 @@ Small, reusable [Jenkins shared library](https://www.jenkins.io/doc/book/pipelin
 The repository is public, so no credential or extra configuration is needed. Pin the tag of the tool you call:
 
 ```groovy
-library identifier: 'jenkinstools@deployStandardProteomicsService/v1.0.0',
+library identifier: 'jenkinstools@deployStandardProteomicsService/v2.0.0',
         retriever: modernSCM([$class: 'GitSCMSource', remote: 'https://github.com/vbc-core-facilities/jenkinstools.git'])
 ```
 
@@ -59,12 +59,13 @@ Both are used the same way: all configuration is defined as variables at the top
 ### `deployStandardProteomicsService`: a standard service
 
 ```groovy
-library identifier: 'jenkinstools@deployStandardProteomicsService/v1.0.0',
+library identifier: 'jenkinstools@deployStandardProteomicsService/v2.0.0',
         retriever: modernSCM([$class: 'GitSCMSource', remote: 'https://github.com/vbc-core-facilities/jenkinstools.git'])
 
 // ############################## configuration ##############################
 def my_image_name               = 'hive.core'
 def my_dockerfile               = 'Hive.Core.WebAPI/Dockerfile'
+def my_docker_context           = './'
 def my_ansible_job_name_staging = 'App Protchem Hive Core Staging'
 def my_ansible_job_name_prod    = 'App Protchem Hive Core Production'
 // ###########################################################################
@@ -72,12 +73,17 @@ def my_ansible_job_name_prod    = 'App Protchem Hive Core Production'
 deployStandardProteomicsService(
   imageName             : my_image_name,
   dockerFile            : my_dockerfile,
+  dockerContext         : my_docker_context,
   towerStagingJobName   : my_ansible_job_name_staging,
   towerProductionJobName: my_ansible_job_name_prod,
 )
 ```
 
-Required inputs: `imageName`, `dockerFile`, `towerStagingJobName` and `towerProductionJobName`. The Tower jobs are named by IT, so they're mapped by hand and never derived. Neither is needed with `tower: false`.
+**Required inputs:**
+- **`imageName`, `dockerFile`, `dockerContext`:** the context is always stated, typically `'./'`, rather than left to `buildDockerImage`'s default.
+- **`towerStagingJobName`, `towerProductionJobName`:** IT names the Tower jobs, so they're mapped by hand and never derived. Neither is needed with `tower: false`.
+
+**Optional `dockerHttpPort`:** the port the container listens on. It's passed as the build arg `APP_PORT`, the stack-neutral name from the OCP deployment standard. The Dockerfile maps it to its stack (`ASPNETCORE_HTTP_PORTS` for Kestrel, the bind address of a Python server, and so on) and uses it for `EXPOSE`. Leave it unset, or `null`, and the Dockerfile's own default applies.
 
 | Convention | Default | Override |
 | --- | --- | --- |
@@ -86,11 +92,11 @@ Required inputs: `imageName`, `dockerFile`, `towerStagingJobName` and `towerProd
 | `tower` | staging job on pushes to `master`; production job on tags with `app_generic_image_tag: <tag>` | A Map with `stagingBranch` and/or `imageTagVariable`. `false` for no Tower (build and push only) |
 | `testResultsFolder` | `/app/tests/results` | any path. `tests: false` means no test step at all |
 | `ocpSmoke` | on | `false` |
-| `buildArgs` | `NUGET_REPO_USER=vbc-proteomics`, `MINVER_VERSION_OVERRIDE=<tag without v>`, `ASPNET_PORT=8080`, `APP_USER=app`, `APP_GROUP_GID=0`, `TEST_RESULTS_FOLDER=<testResultsFolder>`, `SEQ_VERSION=2026.1.17044` | Merged over the defaults; any new names work, and `null` removes one (e.g. `[SEQ_VERSION: null]` for no Seq). `defaultBuildArgs: false` starts empty |
+| `buildArgs` | `NUGET_REPO_USER=vbc-proteomics`, `MINVER_VERSION_OVERRIDE=<tag without v>`, `APP_USER=app`, `APP_GROUP_GID=0`, `TEST_RESULTS_FOLDER=<testResultsFolder>`, `SEQ_VERSION=2026.1.17044` | Merged over the defaults; any new names work, and `null` removes one (e.g. `[SEQ_VERSION: null]` for no Seq). `defaultBuildArgs: false` starts empty (`dockerHttpPort` still applies) |
 | `secrets` | `SECRETS-NUGET-REPO-PW` from `vbc-proteomics-github-pat` | Merged by `id`; any new secrets work. `defaultSecrets: false` starts empty |
 | `cockpitNotify` | `[credentialsId: 'vbc-cockpit-service-bus-send']` | Another Map, or `false` |
 
-Anything else is passed straight to `deployService`, e.g. `testScript`, `ocpSmokeExtraChecks`, `dockerContext`, `towerJobs`, and the actions.
+`testScript` and `ocpSmokeExtraChecks` pass through when tests are on. Anything else is passed straight to `deployService`, e.g. `towerJobs` and the actions.
 
 ### `deployService`: the wiring, no defaults
 
@@ -98,6 +104,7 @@ Anything else is passed straight to `deployService`, e.g. `testScript`, `ocpSmok
 deployService(
   imageName        : my_image_name,
   dockerFile       : my_dockerfile,
+  dockerContext    : my_docker_context,
   imageNamespace   : my_image_namespace,
   pushBranches     : my_observed_git_branches,
   tower            : [staging: my_tower_staging_job, stagingBranch: my_staging_branch,

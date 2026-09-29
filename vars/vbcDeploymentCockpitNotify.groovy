@@ -1,5 +1,5 @@
 /**
- * Version 1.1.0 - released as tag vbcDeploymentCockpitNotify/v1.1.0 (see CHANGELOG.md). Bump both with every change to this file.
+ * Version 1.1.1 - released as tag vbcDeploymentCockpitNotify/v1.1.1 (see CHANGELOG.md). Bump both with every change to this file.
  *
  * Tells the VBC Deployment Cockpit that this build started or finished, so it shows the build as
  * in flight on the matching deployment. Specialised wrapper: sends buildEventMessage(event) to the
@@ -17,7 +17,8 @@
  * By default any failure - including a credential that doesn't exist yet - only warns.
  */
 def call(String event, String connectionString, Map options = [:]) {
-    return send(event, options + [connectionString: connectionString])
+    Map optionsWithConnectionString = options + [connectionString: connectionString]
+    return send(event, optionsWithConnectionString)
 }
 
 def call(String event, Map options) {
@@ -25,39 +26,20 @@ def call(String event, Map options) {
 }
 
 private boolean send(String event, Map options) {
-    // The topic every cockpit instance subscribes to (each with its own subscription).
-    final String topic = 'jenkins-build-events'
     boolean failOnError = options.failOnError == true
 
-    String problem = null
-    if (!(event in ['started', 'finished'])) {
-        problem = "event must be 'started' or 'finished', got '${event}'"
-    } else if (!options.credentialsId && !options.connectionString) {
-        problem = 'pass credentialsId or connectionString'
-    }
-
+    String problem = findConfigurationProblem(event, options)
     if (problem == null) {
-        Map args = [
-            entity    : topic,
-            message   : buildEventMessage(event),
-            timeToLive: 86400, // a build event older than a day is useless to the cockpit
-        ] + options.findAll { k, v -> !(k in ['credentialsId', 'connectionString']) }
-        boolean sent = false
         try {
-            if (options.credentialsId) {
-                withCredentials([string(credentialsId: options.credentialsId as String, variable: 'COCKPIT_SB_CONNECTION')]) {
-                    sent = serviceBusNotify(args + [connectionString: "${COCKPIT_SB_CONNECTION}"])
-                }
-            } else {
-                sent = serviceBusNotify(args + [connectionString: options.connectionString as String])
+            // serviceBusNotify warns (or fails the build) on its own problems.
+            return sendBuildEvent(event, options)
+        } catch (InterruptedException aborted) {
+            throw aborted // build aborted - never swallow
+        } catch (Exception failure) {
+            if (failOnError) {
+                throw failure // serviceBusNotify's own error(), or a missing credential
             }
-            // serviceBusNotify already warned (or failed the build) on its own problems.
-            return sent
-        } catch (InterruptedException e) {
-            throw e // build aborted - never swallow
-        } catch (Exception e) {
-            if (failOnError) throw e // serviceBusNotify's own error(), or a missing credential
-            problem = e.message      // e.g. the credential doesn't exist
+            problem = failure.message // e.g. the credential doesn't exist
         }
     }
 
@@ -66,4 +48,45 @@ private boolean send(String event, Map options) {
     }
     echo "WARNING: vbcDeploymentCockpitNotify: ${problem} - continuing (failOnError is false)"
     return false
+}
+
+private String findConfigurationProblem(String event, Map options) {
+    List<String> knownEvents = ['started', 'finished']
+    if (!(event in knownEvents)) {
+        return "event must be 'started' or 'finished', got '${event}'"
+    }
+    if (!options.credentialsId && !options.connectionString) {
+        return 'pass credentialsId or connectionString'
+    }
+    return null
+}
+
+private boolean sendBuildEvent(String event, Map options) {
+    List<String> secretOptionNames = ['credentialsId', 'connectionString']
+    Map serviceBusOptions = options.findAll { optionName, optionValue -> !(optionName in secretOptionNames) }
+    Map buildEvent = buildEventMessage(event)
+
+    if (options.credentialsId) {
+        boolean sent = false
+        withCredentials([string(credentialsId: options.credentialsId as String, variable: 'COCKPIT_SB_CONNECTION')]) {
+            sent = sendToCockpitTopic("${COCKPIT_SB_CONNECTION}", buildEvent, serviceBusOptions)
+        }
+        return sent
+    }
+    return sendToCockpitTopic(options.connectionString as String, buildEvent, serviceBusOptions)
+}
+
+private boolean sendToCockpitTopic(String connectionString, Map buildEvent, Map serviceBusOptions) {
+    // The topic every cockpit instance subscribes to (each with its own subscription).
+    String cockpitTopic = 'jenkins-build-events'
+    // A build event older than a day is useless to the cockpit.
+    int buildEventTimeToLiveSeconds = 86400
+
+    Map serviceBusArguments = [
+        entity          : cockpitTopic,
+        message         : buildEvent,
+        timeToLive      : buildEventTimeToLiveSeconds,
+        connectionString: connectionString,
+    ] + serviceBusOptions
+    return serviceBusNotify(serviceBusArguments)
 }

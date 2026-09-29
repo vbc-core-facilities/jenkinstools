@@ -1,5 +1,5 @@
 /**
- * Version 1.0.0 - released as tag deployService/v1.0.0 (see CHANGELOG.md). Bump both with every change to this file.
+ * Version 1.0.1 - released as tag deployService/v1.0.1 (see CHANGELOG.md). Bump both with every change to this file.
  *
  * Generic service pipeline wiring on top of IT's buildDockerImage (vbc-cicd), with NO defaults:
  * nothing is assumed, every value comes from the caller, and every optional feature is off unless
@@ -13,7 +13,7 @@
  *   dockerFile           path to the Dockerfile
  *   imageNamespace       registry namespace
  *   pushBranches         List of branches whose images are pushed (may be empty)
- *   dockerContext        optional build context; buildDockerImage's own default when omitted
+ *   dockerContext        optional build context; buildDockerImage's own default ('.') when omitted
  *
  * Build inputs (optional):
  *   buildArgs            Map of docker build args, passed as --build-arg NAME="value"; null values skipped
@@ -46,188 +46,287 @@
  *   afterAlways          after buildDockerImage whatever the outcome (before the 'finished' notification)
  */
 def call(Map config = [:]) {
-    validate(config)
+    failOnInvalidConfiguration(config)
     echo "deployService v${toolVersion()} (jenkinstools)"
 
-    String tagName = env.TAG_NAME ?: 'latest'
+    String imageTag = env.TAG_NAME ?: 'latest'
 
-    // ---- build args + BuildKit secrets --------------------------------------------------------------
-    Map buildArgs = (config.buildArgs ?: [:]).findAll { k, v -> v != null }
-    List<String> buildArgParts = buildArgs.collect { k, v -> "--build-arg ${k}=\"${v}\"" }
+    // ---- build args + BuildKit secrets ----------------------------------------------------------------
+    Map buildArguments = (config.buildArgs ?: [:]).findAll { argumentName, argumentValue -> argumentValue != null }
+    List<Map> buildKitSecrets = config.secrets ?: []
 
-    List<String> secretIds = []
-    (config.secrets ?: []).each { Map s ->
-        String envName = 'secret_' + (s.id as String).replaceAll(/[^A-Za-z0-9_]/, '_')
-        def binding = s.kind == 'string'
-            ? string(credentialsId: s.credentialsId as String, variable: 'DEPLOY_SECRET')
-            : usernamePassword(credentialsId: s.credentialsId as String, usernameVariable: 'DEPLOY_SECRET_USER', passwordVariable: 'DEPLOY_SECRET')
-        withCredentials([binding]) {
-            // BuildKit reads the secret from this env var, so it never appears in build args or logs.
-            env."${envName}" = "${DEPLOY_SECRET}"
-        }
-        buildArgParts << "--secret id=${s.id},type=env,env=${envName}"
-        secretIds << (s.id as String)
+    buildKitSecrets.each { Map buildKitSecret -> exposeSecretToBuildKit(buildKitSecret) }
+
+    List<String> buildArgumentFlags = buildArguments.collect { argumentName, argumentValue ->
+        "--build-arg ${argumentName}=\"${argumentValue}\"".toString()
     }
-    String extraBuildArgs = buildArgParts.join(' ')
+    List<String> secretFlags = buildKitSecrets.collect { Map buildKitSecret -> buildKitSecretFlag(buildKitSecret) }
+    List<String> secretIds = buildKitSecrets.collect { Map buildKitSecret -> buildKitSecret.id as String }
+    String extraBuildArguments = (buildArgumentFlags + secretFlags).join(' ')
 
-    // ---- tower ----------------------------------------------------------------------------------------
-    Map towerJobs = config.towerJobs
-    if (towerJobs == null && config.tower) {
-        Map t = config.tower
-        towerJobs = [:]
-        if (t.staging) {
-            towerJobs[t.stagingBranch as String] = [jobName: t.staging]
-        }
-        if (t.production) {
-            towerJobs.tags = [jobName: t.production, extraVars: "${t.imageTagVariable}: ${tagName}".toString()]
-        }
-    }
+    // ---- tower ------------------------------------------------------------------------------------------
+    Map towerJobs = config.towerJobs ?: toTowerJobs(config.tower, imageTag)
 
-    // ---- build info -----------------------------------------------------------------------------------
-    node {
-        stage('Build info') {
-            sh 'docker version'
-            sh 'docker buildx version'
-            echo "Image: ${config.imageNamespace}/${config.imageName} from ${config.dockerFile}, pushed on ${config.pushBranches}"
-            echo "Build args:\n${buildArgs}"
-            echo "Secret ids injected into docker:\n${secretIds}"
-            echo "Tower jobs:\n${towerJobs ?: 'none (build and push only)'}"
-            echo "GIT_COMMIT=${env.GIT_COMMIT}"
-            echo "GIT_PREVIOUS_SUCCESSFUL_COMMIT=${env.GIT_PREVIOUS_SUCCESSFUL_COMMIT}"
-            currentBuild.changeSets.each { changeSet ->
-                changeSet.items.each { entry -> echo "Change: ${entry.commitId} ${entry.author} ${entry.msg}" }
-            }
-        }
-    }
+    // ---- build info -------------------------------------------------------------------------------------
+    reportBuildInfo(config, buildArguments, secretIds, towerJobs)
 
-    // ---- pipeline -------------------------------------------------------------------------------------
-    Map image = [
+    // ---- pipeline ---------------------------------------------------------------------------------------
+    Closure testStep = needsTestStep(config) ? inImageTestStep(config) : null
+
+    // Parameters that are not set are left out entirely, so buildDockerImage applies its own defaults.
+    Map buildDockerImageParameters = [
         imageName            : config.imageName,
         dockerFile           : config.dockerFile,
+        dockerContext        : config.dockerContext,
         pushRegistryNamespace: config.imageNamespace,
         pushBranches         : config.pushBranches,
-    ]
-    if (extraBuildArgs) image.extraBuildArgs = extraBuildArgs
-    if (config.dockerContext) image.dockerContext = config.dockerContext
-    if (towerJobs) image.tower = towerJobs
-    if (config.testResultsFolder || config.testScript || config.ocpSmoke == true) {
-        image.test = testClosure(config)
-    }
+        extraBuildArgs       : extraBuildArguments ?: null,
+        tower                : towerJobs,
+        test                 : testStep,
+    ].findAll { parameterName, parameterValue -> parameterValue != null }
 
-    Map cockpit = config.cockpitNotify ?: null
-    notifyCockpit(cockpit, 'started')
+    Map cockpitNotification = config.cockpitNotify ?: null
+
+    notifyCockpit(cockpitNotification, 'started')
     try {
         runActions(config.beforeBuild)
-        buildDockerImage(image)
+        buildDockerImage(buildDockerImageParameters)
         runActions(config.afterBuild)
-    } catch (e) {
+    } catch (buildFailure) {
         currentBuild.result = 'FAILURE' // so the 'finished' notification reports the real result
-        throw e
+        throw buildFailure
     } finally {
         try {
             runActions(config.afterAlways)
         } finally {
-            notifyCockpit(cockpit, 'finished')
+            notifyCockpit(cockpitNotification, 'finished')
         }
     }
 }
 
 // This tool's own version; bump it (and tag deployService/vX.Y.Z) with every change to this file.
-private String toolVersion() { return '1.0.0' }
+private String toolVersion() { return '1.0.1' }
 
-private void validate(Map config) {
-    List<String> problems = ['imageName', 'dockerFile', 'imageNamespace'].findAll { !config[it] }
-        .collect { "${it} is required".toString() }
-    if (!(config.pushBranches instanceof List)) problems << 'pushBranches is required (a List, may be empty)'
+// ---- validation --------------------------------------------------------------------------------------
 
-    Map t = config.tower ?: [:]
-    if (t.staging && !t.stagingBranch) problems << 'tower.staging needs tower.stagingBranch'
-    if (t.stagingBranch && !t.staging) problems << 'tower.stagingBranch needs tower.staging'
-    if (t.production && !t.imageTagVariable) problems << 'tower.production needs tower.imageTagVariable'
-    if (config.tower && config.towerJobs) problems << 'pass tower or towerJobs, not both'
-
-    if (config.testScript && !config.testResultsFolder) problems << 'testScript needs testResultsFolder'
-    if (config.ocpSmokeExtraChecks && config.ocpSmoke != true) problems << 'ocpSmokeExtraChecks needs ocpSmoke: true'
-
-    (config.secrets ?: []).each { Map s ->
-        if (!s.id || !s.credentialsId || !(s.kind in ['usernamePassword', 'string'])) {
-            problems << "secret needs id, credentialsId and kind 'usernamePassword' or 'string': ${s}".toString()
-        }
-    }
-    List ids = (config.secrets ?: []).collect { it.id }
-    if (ids.size() != (ids as Set).size()) problems << "duplicate secret ids: ${ids}".toString()
-
-    ['beforeBuild', 'afterBuild', 'afterAlways'].each { name ->
-        def a = config[name]
-        if (a != null && !(a instanceof Closure) && !(a instanceof List && a.every { it instanceof Closure })) {
-            problems << "${name} must be a Closure or a List of Closures".toString()
-        }
-    }
-
-    if (problems) {
-        error("deployService: invalid configuration:\n  - ${problems.join('\n  - ')}")
+private void failOnInvalidConfiguration(Map config) {
+    List<String> problems = requiredInputProblems(config) +
+        towerProblems(config) +
+        testProblems(config) +
+        secretProblems(config) +
+        actionProblems(config)
+    if (!problems.isEmpty()) {
+        String problemList = problems.join('\n  - ')
+        error("deployService: invalid configuration:\n  - ${problemList}")
     }
 }
+
+private List<String> requiredInputProblems(Map config) {
+    List<String> requiredInputNames = [
+        'imageName',
+        'dockerFile',
+        'imageNamespace',
+    ]
+    List<String> missingInputNames = requiredInputNames.findAll { String inputName -> !config[inputName] }
+    List<String> missingInputProblems = missingInputNames.collect { String inputName -> "${inputName} is required".toString() }
+    String pushBranchesProblem = config.pushBranches instanceof List ? null : 'pushBranches is required (a List, may be empty)'
+    return withoutNulls(missingInputProblems + [pushBranchesProblem])
+}
+
+private List<String> towerProblems(Map config) {
+    Map tower = config.tower ?: [:]
+    List<String> candidateProblems = [
+        tower.staging && !tower.stagingBranch ? 'tower.staging needs tower.stagingBranch' : null,
+        tower.stagingBranch && !tower.staging ? 'tower.stagingBranch needs tower.staging' : null,
+        tower.production && !tower.imageTagVariable ? 'tower.production needs tower.imageTagVariable' : null,
+        config.tower && config.towerJobs ? 'pass tower or towerJobs, not both' : null,
+    ]
+    return withoutNulls(candidateProblems)
+}
+
+private List<String> testProblems(Map config) {
+    List<String> candidateProblems = [
+        config.testScript && !config.testResultsFolder ? 'testScript needs testResultsFolder' : null,
+        config.ocpSmokeExtraChecks && config.ocpSmoke != true ? 'ocpSmokeExtraChecks needs ocpSmoke: true' : null,
+    ]
+    return withoutNulls(candidateProblems)
+}
+
+private List<String> secretProblems(Map config) {
+    List<Map> buildKitSecrets = config.secrets ?: []
+    List<String> secretKinds = ['usernamePassword', 'string']
+
+    List<Map> malformedSecrets = buildKitSecrets.findAll { Map buildKitSecret ->
+        !buildKitSecret.id || !buildKitSecret.credentialsId || !(buildKitSecret.kind in secretKinds)
+    }
+    List<String> malformedSecretProblems = malformedSecrets.collect { Map buildKitSecret ->
+        "secret needs id, credentialsId and kind 'usernamePassword' or 'string': ${buildKitSecret}".toString()
+    }
+
+    List<String> secretIds = buildKitSecrets.collect { Map buildKitSecret -> buildKitSecret.id as String }
+    Set<String> distinctSecretIds = secretIds as Set
+    String duplicateIdProblem = secretIds.size() != distinctSecretIds.size() ? "duplicate secret ids: ${secretIds}".toString() : null
+
+    return withoutNulls(malformedSecretProblems + [duplicateIdProblem])
+}
+
+private List<String> actionProblems(Map config) {
+    List<String> actionNames = [
+        'beforeBuild',
+        'afterBuild',
+        'afterAlways',
+    ]
+    List<String> invalidActionNames = actionNames.findAll { String actionName ->
+        def action = config[actionName]
+        boolean isClosure = action instanceof Closure
+        boolean isListOfClosures = action instanceof List && action.every { listElement -> listElement instanceof Closure }
+        action != null && !isClosure && !isListOfClosures
+    }
+    return invalidActionNames.collect { String actionName -> "${actionName} must be a Closure or a List of Closures".toString() }
+}
+
+private List<String> withoutNulls(List<String> candidates) {
+    return candidates.findAll { String candidate -> candidate != null }
+}
+
+// ---- build inputs ----------------------------------------------------------------------------------------
+
+private String secretEnvironmentVariableName(Map buildKitSecret) {
+    String sanitizedId = (buildKitSecret.id as String).replaceAll(/[^A-Za-z0-9_]/, '_')
+    return "secret_${sanitizedId}"
+}
+
+// BuildKit reads the secret from this env var, so it never appears in build args or logs.
+private void exposeSecretToBuildKit(Map buildKitSecret) {
+    String credentialsId = buildKitSecret.credentialsId as String
+    def credentialBinding = buildKitSecret.kind == 'string'
+        ? string(credentialsId: credentialsId, variable: 'DEPLOY_SECRET')
+        : usernamePassword(credentialsId: credentialsId, usernameVariable: 'DEPLOY_SECRET_USER', passwordVariable: 'DEPLOY_SECRET')
+    String environmentVariableName = secretEnvironmentVariableName(buildKitSecret)
+    withCredentials([credentialBinding]) {
+        env."${environmentVariableName}" = "${DEPLOY_SECRET}"
+    }
+}
+
+private String buildKitSecretFlag(Map buildKitSecret) {
+    String environmentVariableName = secretEnvironmentVariableName(buildKitSecret)
+    return "--secret id=${buildKitSecret.id},type=env,env=${environmentVariableName}".toString()
+}
+
+// [staging, stagingBranch, production, imageTagVariable] -> buildDockerImage's tower map, or null.
+private Map toTowerJobs(Map tower, String imageTag) {
+    if (!tower) {
+        return null
+    }
+    Map stagingJobs = tower.staging
+        ? [(tower.stagingBranch as String): [jobName: tower.staging]]
+        : [:]
+    Map productionJobs = tower.production
+        ? [tags: [jobName: tower.production, extraVars: "${tower.imageTagVariable}: ${imageTag}".toString()]]
+        : [:]
+    return stagingJobs + productionJobs
+}
+
+// ---- reporting ---------------------------------------------------------------------------------------------
+
+private void reportBuildInfo(Map config, Map buildArguments, List<String> secretIds, Map towerJobs) {
+    node {
+        stage('Build info') {
+            sh 'docker version'
+            sh 'docker buildx version'
+            echo "Image: ${config.imageNamespace}/${config.imageName} from ${config.dockerFile} (context ${config.dockerContext ?: '<buildDockerImage default>'}), pushed on ${config.pushBranches}"
+            echo "Build args:\n${buildArguments}"
+            echo "Secret ids injected into docker:\n${secretIds}"
+            echo "Tower jobs:\n${towerJobs ?: 'none (build and push only)'}"
+            echo "GIT_COMMIT=${env.GIT_COMMIT}"
+            echo "GIT_PREVIOUS_SUCCESSFUL_COMMIT=${env.GIT_PREVIOUS_SUCCESSFUL_COMMIT}"
+            currentBuild.changeSets.each { changeSet ->
+                changeSet.items.each { changeEntry ->
+                    echo "Change: ${changeEntry.commitId} ${changeEntry.author} ${changeEntry.msg}"
+                }
+            }
+        }
+    }
+}
+
+// ---- actions and notification ------------------------------------------------------------------------------
 
 private void runActions(def actions) {
-    if (actions == null) return
-    (actions instanceof List ? actions : [actions]).each { Closure action -> action() }
+    if (actions == null) {
+        return
+    }
+    List<Closure> actionList = actions instanceof List ? actions : [actions]
+    actionList.each { Closure action -> action() }
 }
 
-private void notifyCockpit(Map cockpit, String event) {
-    if (!cockpit) {
+private void notifyCockpit(Map cockpitNotification, String event) {
+    if (!cockpitNotification) {
         return
     }
     try {
         node {
-            vbcDeploymentCockpitNotify(event, cockpit) // credentialsId or connectionString, + options
+            vbcDeploymentCockpitNotify(event, cockpitNotification) // credentialsId or connectionString, + options
         }
-    } catch (InterruptedException e) {
-        throw e
-    } catch (Exception e) {
+    } catch (InterruptedException aborted) {
+        throw aborted
+    } catch (Exception failure) {
         // e.g. no agent available - never let the notification break a build unless asked to
-        if (cockpit.failOnError == true) throw e
-        echo "WARNING: deployService: cockpit '${event}' notification failed: ${e.message} - continuing"
+        if (cockpitNotification.failOnError == true) {
+            throw failure
+        }
+        echo "WARNING: deployService: cockpit '${event}' notification failed: ${failure.message} - continuing"
     }
 }
 
+// ---- tests -------------------------------------------------------------------------------------------------
+
+private boolean needsTestStep(Map config) {
+    return config.testResultsFolder || config.testScript || config.ocpSmoke == true
+}
+
 // buildDockerImage calls this with (defaultImageName, allBuilds) after building the image.
-private Closure testClosure(Map config) {
+private Closure inImageTestStep(Map config) {
     String testResultsFolder = config.testResultsFolder as String
+    String workspaceResultsFolder = 'test_results'
+
     return { defaultImageName, allBuilds ->
-        def built = allBuilds[defaultImageName]
-        String resultsInWorkspace = 'test_results'
+        def builtImage = allBuilds[defaultImageName]
 
         if (testResultsFolder) {
-            sh "mkdir -p ${resultsInWorkspace}; chmod 777 ${resultsInWorkspace}"
+            sh "mkdir -p ${workspaceResultsFolder}; chmod 777 ${workspaceResultsFolder}"
             try {
-                built.image.inside() {
+                builtImage.image.inside() {
                     if (config.testScript) {
-                        int testStatus = sh(script: "${config.testScript} ${testResultsFolder}", returnStatus: true, label: 'in-image tests')
-                        if (testStatus > 0) {
+                        int testScriptExitCode = sh(
+                            script: "${config.testScript} ${testResultsFolder}",
+                            returnStatus: true,
+                            label: 'in-image tests'
+                        )
+                        if (testScriptExitCode > 0) {
                             unstable('Test script returned a non-zero exit code.')
                         }
                     }
                     sh """
                     if [ -d ${testResultsFolder} ]; then
-                      cp -r ${testResultsFolder}/. ${env.WORKSPACE}/${resultsInWorkspace}
+                      cp -r ${testResultsFolder}/. ${env.WORKSPACE}/${workspaceResultsFolder}
                     else
                       echo "No test results found in ${testResultsFolder}"
                     fi
                     """
                 }
-            } catch (exc) {
-                echo "Error occurred while running/collecting in-image tests: ${exc}"
+            } catch (testFailure) {
+                echo "Error occurred while running/collecting in-image tests: ${testFailure}"
                 unstable('Exception raised while running/collecting in-image tests.')
             }
         }
 
         if (config.ocpSmoke == true) {
-            ocpProbeSmoke(built.image.id, config.ocpSmokeExtraChecks ?: [])
+            List<String> extraSmokeChecks = config.ocpSmokeExtraChecks ?: []
+            ocpProbeSmoke(builtImage.image.id as String, extraSmokeChecks)
         }
 
         if (testResultsFolder) {
-            junit skipPublishingChecks: true, allowEmptyResults: true, testResults: "${resultsInWorkspace}/*.xml"
+            junit skipPublishingChecks: true, allowEmptyResults: true, testResults: "${workspaceResultsFolder}/*.xml"
         }
     }
 }
@@ -238,10 +337,12 @@ private Closure testClosure(Map config) {
 // failure at all. It never starts the app (one-shot docker run), which is what makes the negative
 // control meaningful. A failure marks the build UNSTABLE, never FAILED: an image-mechanics
 // regression must be loud without blocking an otherwise shippable artifact.
-private void ocpProbeSmoke(String imageId, List extraChecks) {
+private void ocpProbeSmoke(String imageId, List<String> extraSmokeChecks) {
     try {
-        String extra = extraChecks ? ('\n# repo-specific checks\n' + extraChecks.join('\n') + '\n') : ''
-        String mechanicsScript = '''
+        String repoSpecificChecks = extraSmokeChecks
+            ? '\n# repo-specific checks\n' + extraSmokeChecks.join('\n') + '\n'
+            : ''
+        String mechanicsScriptStart = '''
 set -e
 id
 
@@ -251,7 +352,8 @@ for p in startup live ready; do
 done
 command -v curl >/dev/null 2>&1 || { echo "[smoke] curl missing from runtime image" >&2; exit 1; }
 touch /logs/.smoke-write-test && rm -f /logs/.smoke-write-test
-''' + extra + '''
+'''
+        String mechanicsScriptEnd = '''
 # Positive path: the scripts run and succeed when told to (also parse-checks all four files).
 HEALTH_STARTUP_CHECK=pass /ocp/probes/startup
 HEALTH_LIVE_CHECK=pass   /ocp/probes/live
@@ -264,18 +366,19 @@ if HEALTH_READY_CHECK=http:/healthz /ocp/probes/ready >/dev/null 2>&1; then
 fi
 
 echo "[smoke] OCP mechanics OK"
-'''.trim()
+'''
+        String mechanicsScript = (mechanicsScriptStart + repoSpecificChecks + mechanicsScriptEnd).trim()
 
-        int status = sh(
+        int smokeExitCode = sh(
             script: "docker run --rm --user 123456:0 ${imageId} '${mechanicsScript}'",
             returnStatus: true,
             label: 'ocp arbitrary uid probe mechanics smoke'
         )
-        if (status > 0) {
+        if (smokeExitCode > 0) {
             unstable('OCP arbitrary-UID probe mechanics smoke returned non-zero exit code.')
         }
-    } catch (exc) {
-        echo "Error occurred while running OCP arbitrary-UID probe smoke: ${exc}"
+    } catch (smokeFailure) {
+        echo "Error occurred while running OCP arbitrary-UID probe smoke: ${smokeFailure}"
         unstable('Exception raised while running OCP arbitrary-UID probe smoke.')
     }
 }

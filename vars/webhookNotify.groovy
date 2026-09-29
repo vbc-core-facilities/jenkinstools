@@ -1,5 +1,5 @@
 /**
- * Version 1.0.0 - released as tag webhookNotify/v1.0.0 (see CHANGELOG.md). Bump both with every change to this file.
+ * Version 1.0.1 - released as tag webhookNotify/v1.0.1 (see CHANGELOG.md). Bump both with every change to this file.
  *
  * Sends an arbitrary message to an arbitrary HTTP(S) endpoint. Knows nothing about the receiver.
  *
@@ -27,54 +27,69 @@
  */
 def call(Map args = [:]) {
     boolean failOnError = args.failOnError == true
-    String problem = null
 
+    String problem
     try {
         problem = send(args)
-    } catch (InterruptedException e) {
-        throw e // build aborted - never swallow
-    } catch (Exception e) {
-        problem = e.message
+    } catch (InterruptedException aborted) {
+        throw aborted // build aborted - never swallow
+    } catch (Exception failure) {
+        problem = failure.message
     }
 
-    String what = args.url ? "${args.method ?: 'POST'} ${args.url}" : 'webhookNotify'
+    String method = args.method ?: 'POST'
+    String requestDescription = args.url ? "${method} ${args.url}" : 'webhookNotify'
+
     if (problem == null) {
-        echo "${what}: sent"
+        echo "${requestDescription}: sent"
         return true
     }
     if (failOnError) {
-        error("${what}: ${problem}")
+        error("${requestDescription}: ${problem}")
     }
-    echo "WARNING: ${what}: ${problem} - continuing (failOnError is false)"
+    echo "WARNING: ${requestDescription}: ${problem} - continuing (failOnError is false)"
     return false
 }
 
 // Returns null on success, otherwise a description of what went wrong.
 private String send(Map args) {
-    def missing = ['url', 'message'].findAll { args[it] == null || args[it] == '' }
-    if (missing) {
-        return "missing required argument(s): ${missing.join(', ')}"
+    List<String> requiredArgumentNames = ['url', 'message']
+    List<String> missingArgumentNames = requiredArgumentNames.findAll { String argumentName ->
+        args[argumentName] == null || args[argumentName] == ''
+    }
+    if (!missingArgumentNames.isEmpty()) {
+        return "missing required argument(s): ${missingArgumentNames.join(', ')}"
     }
 
     String body = args.message instanceof CharSequence ? args.message.toString() : toJson(args.message)
-    String method = (args.method ?: 'POST') as String
+    String method = args.method ?: 'POST'
     int timeoutSeconds = (args.timeoutSeconds ?: 10) as int
+    String contentType = args.contentType ?: 'application/json'
+    String authHeaderName = args.authHeader ?: 'Authorization'
+    String authSchemePrefix = args.authScheme ? "${args.authScheme} " : ''
 
-    // Non-secret headers, one "Name: value" per line; the shell adds the auth header.
-    List<String> headerLines = ["Content-Type: ${args.contentType ?: 'application/json'}"]
-    (args.headers ?: [:]).each { k, v -> headerLines << "${k}: ${v}" }
+    // Non-secret headers, one "Name: value" per line; the shell appends the auth header.
+    Map extraHeaders = args.headers ?: [:]
+    List<String> extraHeaderLines = extraHeaders.collect { headerName, headerValue ->
+        "${headerName}: ${headerValue}".toString()
+    }
+    List<String> headerLines = ["Content-Type: ${contentType}".toString()] + extraHeaderLines
+    String headerLinesText = headerLines.join('\n')
 
     // Body and headers travel as env vars and the shell writes them to mktemp files, so there are
     // no workspace files to name uniquely or clean up (messages are small).
-    List<String> envVars = [
-        "NOTIFY_URL=${args.url}", "NOTIFY_METHOD=${method}", "NOTIFY_TIMEOUT=${timeoutSeconds}",
-        "NOTIFY_BODY=${body}", "NOTIFY_HEADER_LINES=${headerLines.join('\n')}",
-        "NOTIFY_AUTH_HEADER=${args.authHeader ?: 'Authorization'}",
-        "NOTIFY_AUTH_SCHEME=${args.authScheme ? args.authScheme + ' ' : ''}",
+    List<String> requestEnvironment = [
+        "NOTIFY_URL=${args.url}",
+        "NOTIFY_METHOD=${method}",
+        "NOTIFY_TIMEOUT=${timeoutSeconds}",
+        "NOTIFY_BODY=${body}",
+        "NOTIFY_HEADER_LINES=${headerLinesText}",
+        "NOTIFY_AUTH_HEADER=${authHeaderName}",
+        "NOTIFY_AUTH_SCHEME=${authSchemePrefix}",
     ]
 
     // Single-quoted on purpose: the shell expands the secret, Groovy never interpolates it.
-    String script = '''
+    String curlScript = '''
         set +x
         hdrs=$(mktemp) || exit 1
         trap 'rm -f "$hdrs"' EXIT
@@ -85,37 +100,56 @@ private String send(Map args) {
         printf '%s' "$NOTIFY_BODY" | curl --silent --show-error --fail --max-time "$NOTIFY_TIMEOUT" -o /dev/null \
           -X "$NOTIFY_METHOD" "$NOTIFY_URL" -H @"$hdrs" --data-binary @-
     '''
+    String stepLabel = "notify ${args.url}"
 
-    int status = 0
-    withEnv(envVars) {
+    int curlExitCode = 0
+    withEnv(requestEnvironment) {
         if (args.credentialsId) {
             withCredentials([string(credentialsId: args.credentialsId, variable: 'NOTIFY_SECRET')]) {
-                status = sh(label: "notify ${args.url}", returnStatus: true, script: script)
+                curlExitCode = sh(label: stepLabel, returnStatus: true, script: curlScript)
             }
         } else if (args.secret) {
             withEnv(["NOTIFY_SECRET=${args.secret}"]) {
-                status = sh(label: "notify ${args.url}", returnStatus: true, script: script)
+                curlExitCode = sh(label: stepLabel, returnStatus: true, script: curlScript)
             }
         } else {
-            status = sh(label: "notify ${args.url}", returnStatus: true, script: script)
+            curlExitCode = sh(label: stepLabel, returnStatus: true, script: curlScript)
         }
     }
-    return status == 0 ? null : "failed (curl exit code ${status}; 22 = HTTP error status, 28 = timeout)"
+
+    if (curlExitCode == 0) {
+        return null
+    }
+    return "failed (curl exit code ${curlExitCode}; 22 = HTTP error status, 28 = timeout)"
 }
 
 // Small JSON encoder (Map/List/String/Number/Boolean/null); groovy.json may need script approval in the sandbox.
 private String toJson(Object value) {
-    if (value == null) return 'null'
+    if (value == null) {
+        return 'null'
+    }
     if (value instanceof Map) {
-        return '{' + value.collect { k, v -> quote(k as String) + ':' + toJson(v) }.join(',') + '}'
+        List<String> encodedMembers = value.collect { memberName, memberValue ->
+            quote(memberName as String) + ':' + toJson(memberValue)
+        }
+        return '{' + encodedMembers.join(',') + '}'
     }
     if (value instanceof Collection || value instanceof Object[]) {
-        return '[' + value.collect { toJson(it) }.join(',') + ']'
+        List<String> encodedElements = value.collect { element -> toJson(element) }
+        return '[' + encodedElements.join(',') + ']'
     }
-    if (value instanceof Number || value instanceof Boolean) return value.toString()
+    if (value instanceof Number || value instanceof Boolean) {
+        return value.toString()
+    }
     return quote(value.toString())
 }
 
-private String quote(String s) {
-    return '"' + s.replace('\\', '\\\\').replace('"', '\\"').replace('\n', '\\n').replace('\r', '\\r').replace('\t', '\\t') + '"'
+private String quote(String text) {
+    String escapedText = text
+        .replace('\\', '\\\\')
+        .replace('"', '\\"')
+        .replace('\n', '\\n')
+        .replace('\r', '\\r')
+        .replace('\t', '\\t')
+    return '"' + escapedText + '"'
 }
