@@ -1,5 +1,5 @@
 /**
- * Version 2.0.0 - released as tag deployService/v2.0.0 (see CHANGELOG.md). Bump both with every change to this file.
+ * Version 2.1.0 - released as tag deployService/v2.1.0 (see CHANGELOG.md). Bump both with every change to this file.
  *
  * Generic service pipeline wiring on top of IT's buildDockerImage (vbc-cicd), with NO defaults:
  * nothing is assumed, every value comes from the caller, and every optional feature is off unless
@@ -37,17 +37,31 @@
  *   ocpSmokeExtraChecks  List of extra shell lines for the smoke (no single quotes)
  *
 
- * Image coherence check (always on, nothing to configure):
- *   Each pipeline run generates a GUID and has it put on its image as the label coherence_guid_5ab99355877948ccbde41c74e4a95bdd (through
- *   buildDockerImage's extraBuildArgs). After the pipeline, the image this build pushed (<imageRegistry>/<imageNamespace>/
- *   <imageName>:<tag>, for a tag build the tag, for a branch build the branch tag when the branch is in pushBranches) is
- *   pulled and must carry that same GUID. If it does not, the image under that tag was made by another build.
+
+
+ * Image coherence check (always on; only builds that push an image are checked):
+ *   highFidelity         optional, default false. true makes a same-category-but-different-commit finding (see below) fail
+ *                        the build instead of marking it UNSTABLE; deployStandardProteomicsService sets it on tag builds.
+ *   Every image gets three labels through buildDockerImage's extraBuildArgs, all named with a fixed GUID of this tool:
+ *     coherence_guid_<tool GUID>   = <GUID generated for this pipeline run>
+ *     provenance_label_<tool GUID> = <build category: the tag name for a tag build, the branch name for a branch build>
+ *     coherence_commit_<tool GUID> = <the commit this build builds>
+ *   After the pipeline, the image this build pushed (<imageRegistry>/<imageNamespace>/<imageName>:<tag>; for a tag build the
+ *   tag, for a branch build the branch tag when the branch is in pushBranches) is pulled and checked. A build that pushes
+ *   nothing (pull request, branch not in pushBranches) is not checked at all.
+ *     1. It carries this run's GUID: fine.
+ *     2. Another category, or none: FAILS, whatever highFidelity says. The tag holds an image made by a different kind of
+ *        build (the tag build's image under master, or the branch build's image under v1.2.3).
+ *     3. Same category and same commit: fine, only a warning that it came from a different run.
+ *     4. Same category, different commit: highFidelity FAILS. Otherwise the build is UNSTABLE, and the log says whether the
+ *        image is older (an older build overwrote this one), newer (a newer build replaced it, e.g. two quick pushes to
+ *        master), or of unknown order.
  *   Why: buildDockerImage names the local image after the commit, so two builds of the same commit on one agent (the branch
  *   build and the tag build, in either direction) can overwrite each other's image before the push, and a tag then points to
  *   the other build's image (seen 2026-10-06: tags v2.43.0 / v1.33.0 released as 0.0.0).
  *   A DETECTOR, not a prevention: the push and the Tower deploy happen inside buildDockerImage, so the check runs after them.
- *   When it fails the build says so: the wrong state was found after the pipeline had finished, the deployed state is most
- *   likely wrong and has to be redone. A check that cannot run (pull or inspect fails) only marks the build UNSTABLE.
+ *   A failure says so: the wrong state was found after the pipeline had finished, the deployed state is most likely wrong and
+ *   has to be redone. A check that cannot run (pull or inspect fails) only marks the build UNSTABLE.
  *
  * Notification (optional):
  *   cockpitNotify        [credentialsId: '...'] or [connectionString: '...'] plus any
@@ -77,8 +91,16 @@ def call(Map config = [:]) {
     List<String> secretFlags = buildKitSecrets.collect { Map buildKitSecret -> buildKitSecretFlag(buildKitSecret) }
     List<String> secretIds = buildKitSecrets.collect { Map buildKitSecret -> buildKitSecret.id as String }
     String buildGuid = UUID.randomUUID().toString()
-    String buildGuidFlag = "--label ${buildGuidLabelName()}=${buildGuid}".toString()
-    String extraBuildArguments = (buildArgumentFlags + secretFlags + [buildGuidFlag]).join(' ')
+    String buildCategory = buildCategoryOf()
+    String buildCommit = pushedImageTag(config) != null ? resolveBuildCommit() : null
+    List<String> coherenceFlags = ["--label ${buildGuidLabelName()}=${buildGuid}".toString()]
+    if (buildCategory) {
+        coherenceFlags << "--label ${buildCategoryLabelName()}=${buildCategory}".toString()
+    }
+    if (buildCommit) {
+        coherenceFlags << "--label ${buildCommitLabelName()}=${buildCommit}".toString()
+    }
+    String extraBuildArguments = (buildArgumentFlags + secretFlags + coherenceFlags).join(' ')
 
     // ---- tower ------------------------------------------------------------------------------------------
     Map towerJobs = config.towerJobs ?: toTowerJobs(config.tower, imageTag)
@@ -107,7 +129,7 @@ def call(Map config = [:]) {
     try {
         runActions(config.beforeBuild)
         buildDockerImage(buildDockerImageParameters)
-        verifyPushedImageCoherence(config, buildGuid)
+        verifyPushedImageCoherence(config, buildGuid, buildCategory, buildCommit)
         runActions(config.afterBuild)
     } catch (buildFailure) {
         currentBuild.result = 'FAILURE' // so the 'finished' notification reports the real result
@@ -122,7 +144,7 @@ def call(Map config = [:]) {
 }
 
 // This tool's own version; bump it (and tag deployService/vX.Y.Z) with every change to this file.
-private String toolVersion() { return '2.0.0' }
+private String toolVersion() { return '2.1.0' }
 
 // ---- validation --------------------------------------------------------------------------------------
 
@@ -298,10 +320,31 @@ private void notifyCockpit(Map cockpitNotification, String event) {
 
 // ---- image coherence check -----------------------------------------------------------------------------------
 
-// The label this library puts on its own image (through buildDockerImage's extraBuildArgs), carrying the pipeline run's GUID.
-private String buildGuidLabelName() { return 'coherence_guid_5ab99355877948ccbde41c74e4a95bdd' }
+// Fixed GUID of this tool: it makes the label names unique, so no other label can collide with them.
+private String coherenceToolGuid() { return '5ab99355877948ccbde41c74e4a95bdd' }
 
-// The one image this build pushed: a tag build the tag, a branch build its branch tag. null when this build pushes nothing.
+// Value: the GUID generated for one pipeline run.
+private String buildGuidLabelName() { return "coherence_guid_${coherenceToolGuid()}".toString() }
+
+// Value: the build category, the same for every build of one branch or one tag.
+private String buildCategoryLabelName() { return "provenance_label_${coherenceToolGuid()}".toString() }
+
+// Value: the commit the build builds.
+private String buildCommitLabelName() { return "coherence_commit_${coherenceToolGuid()}".toString() }
+
+// The build category: the tag name for a tag build, the branch name for a branch build. It ends up in a shell command line,
+// so it is only used when it consists of docker tag characters (a branch name may contain shell metacharacters). null otherwise.
+private String buildCategoryOf() {
+    String category = (env.TAG_NAME ?: env.BRANCH_NAME) as String
+    return category ==~ /[A-Za-z0-9_][A-Za-z0-9_.-]{0,127}/ ? category : null
+}
+
+private boolean isCommitHash(String text) {
+    return text != null && text ==~ /[0-9a-f]{40}/
+}
+
+// The one image this build pushes: a tag build the tag, a branch build its branch tag. null when this build pushes nothing
+// (pull request, branch not in pushBranches): such a build is not checked at all.
 private String pushedImageTag(Map config) {
     if (env.TAG_NAME) {
         return env.TAG_NAME as String
@@ -310,23 +353,72 @@ private String pushedImageTag(Map config) {
     return branch && (config.pushBranches ?: []).contains(branch) ? branch : null
 }
 
-// After the pipeline: the image under the pushed tag must carry the GUID this run put on its own image.
-private void verifyPushedImageCoherence(Map config, String buildGuid) {
+// The commit this build builds. GIT_COMMIT is only set once buildDockerImage has checked out, which is after the labels are
+// decided, so this does a checkout of its own. null when it cannot be determined; the check then reports the commit as unknown.
+private String resolveBuildCommit() {
+    try {
+        String commit = null
+        node {
+            commit = checkout(scm).GIT_COMMIT as String
+        }
+        return isCommitHash(commit) ? commit : null
+    } catch (InterruptedException aborted) {
+        throw aborted
+    } catch (Exception failure) {
+        echo "WARNING: deployService: could not determine the commit being built (${failure.message}); the image coherence check will treat it as unknown"
+        return null
+    }
+}
+
+private String labelOf(String image, String labelName) {
+    return sh(
+        script: "docker image inspect --format '{{index .Config.Labels \"${labelName}\"}}' ${image}",
+        returnStdout: true,
+        label: "read the ${labelName} label of the pushed image"
+    ).trim()
+}
+
+// Where the commit found on the pushed image stands against the commit this build builds, by git ancestry in a checkout of this
+// build: 'older', 'newer', 'not-in-checkout' (not reachable from this build's checkout: most likely newer, pushed after this build
+// started), 'unrelated' (neither is an ancestor of the other) or 'unknown' (no checkout possible). Both hashes are verified hex.
+private String orderOfPushedCommit(String pushedCommit, String buildCommit) {
+    try {
+        checkout(scm)
+        if (sh(script: "git cat-file -e '${pushedCommit}^{commit}'", returnStatus: true) != 0) {
+            return 'not-in-checkout'
+        }
+        if (sh(script: "git merge-base --is-ancestor ${pushedCommit} ${buildCommit}", returnStatus: true) == 0) {
+            return 'older'
+        }
+        if (sh(script: "git merge-base --is-ancestor ${buildCommit} ${pushedCommit}", returnStatus: true) == 0) {
+            return 'newer'
+        }
+        return 'unrelated'
+    } catch (InterruptedException aborted) {
+        throw aborted
+    } catch (Exception failure) {
+        return 'unknown'
+    }
+}
+
+// After the pipeline: what is under the pushed tag must be this run's image, or at least come from the same kind of build.
+private void verifyPushedImageCoherence(Map config, String buildGuid, String buildCategory, String buildCommit) {
     String tag = pushedImageTag(config)
     if (tag == null) {
         return
     }
     String pushedImage = "${config.imageRegistry}/${config.imageNamespace}/${config.imageName}:${tag}".toString()
+    boolean highFidelity = config.highFidelity == true
     node {
         stage('Verify image coherence') {
             String labelledGuid
+            String labelledCategory
+            String labelledCommit
             try {
                 sh(script: "docker pull -q ${pushedImage}", label: 'pull the pushed image')
-                labelledGuid = sh(
-                    script: "docker image inspect --format '{{index .Config.Labels \"${buildGuidLabelName()}\"}}' ${pushedImage}",
-                    returnStdout: true,
-                    label: 'read the build GUID the pushed image carries'
-                ).trim()
+                labelledGuid = labelOf(pushedImage, buildGuidLabelName())
+                labelledCategory = labelOf(pushedImage, buildCategoryLabelName())
+                labelledCommit = labelOf(pushedImage, buildCommitLabelName())
             } catch (InterruptedException aborted) {
                 throw aborted
             } catch (Exception unreadable) {
@@ -335,14 +427,47 @@ private void verifyPushedImageCoherence(Map config, String buildGuid) {
             } finally {
                 sh(script: "docker image rm ${pushedImage} || true", label: 'remove the pulled image')
             }
-            if (labelledGuid != buildGuid) {
-                error("IMAGE COHERENCE CHECK FAILED AFTER THE PIPELINE HAD ALREADY PUSHED AND DEPLOYED. This run put the build GUID ${buildGuid} on its image, " +
-                    "but ${pushedImage} carries ${labelledGuid ?: 'none'}: it was made by another build. " +
-                    "This was found only now, after the push and the Tower deployment had finished, so whatever was deployed from this tag is most likely " +
-                    "the wrong image: the deployed state is most likely wrong and has to be redone. " +
-                    "Cause: another build of the same commit on the same agent re-pointed the shared local image name before the push. " +
-                    "Redo: let the other build finish, re-run this build, and redeploy.")
+
+            // 1. this run's own image
+            if (labelledGuid == buildGuid) {
+                return
             }
+            String shown = "${pushedImage} (build category ${labelledCategory ?: 'none'}, commit ${labelledCommit ?: 'none'}, GUID ${labelledGuid ?: 'none'})"
+            String afterTheFact = "This was found only now, after the push and the Tower deployment had finished, so whatever was deployed from this tag " +
+                "is most likely the wrong image: the deployed state is most likely wrong and has to be redone. " +
+                "Cause: another build of the same commit on the same agent re-pointed the shared local image name before the push. " +
+                "Redo: let the other build finish, re-run this build, and redeploy."
+
+            // 2. another category (or none): not acceptable
+            if (buildCategory == null || labelledCategory != buildCategory) {
+                error("IMAGE COHERENCE CHECK FAILED AFTER THE PIPELINE HAD ALREADY PUSHED AND DEPLOYED. This run (build category ${buildCategory ?: 'unknown'}, " +
+                    "commit ${buildCommit ?: 'unknown'}, GUID ${buildGuid}) built its image, but ${shown} was made by a different kind of build. " + afterTheFact)
+            }
+
+            // 3. same category, same commit: another run of the same thing
+            if (buildCommit != null && labelledCommit == buildCommit) {
+                echo "WARNING: image coherence: ${shown} was made by another run of the same build category and commit as this run (GUID ${buildGuid}). " +
+                    "It is the same code, but it did not come from this run."
+                return
+            }
+
+            // 4. same category, different (or unknown) commit
+            boolean commitsKnownDifferent = isCommitHash(buildCommit) && isCommitHash(labelledCommit)
+            if (commitsKnownDifferent && highFidelity) {
+                error("IMAGE COHERENCE CHECK FAILED AFTER THE PIPELINE HAD ALREADY PUSHED AND DEPLOYED. This run built commit ${buildCommit} for build category " +
+                    "${buildCategory}, but ${shown} holds a different commit. " + afterTheFact)
+            }
+            String order = commitsKnownDifferent ? orderOfPushedCommit(labelledCommit, buildCommit) : 'unknown'
+            Map orderText = [
+                older            : 'an OLDER commit than this build: an older build of the same branch overwrote this build\'s image after it was pushed, so the registry (and whatever was deployed from it) is behind this build',
+                newer            : 'a NEWER commit than this build: a newer build of the same branch replaced this build\'s image',
+                'not-in-checkout': 'a commit that is not reachable from this build\'s commit: most likely a NEWER one pushed after this build started, otherwise one from unrelated history',
+                unrelated        : 'a commit unrelated to this build\'s commit (neither is an ancestor of the other, force-push?)',
+                unknown          : 'a commit whose order against this build could not be determined',
+            ]
+            String message = "image coherence: ${shown} holds ${orderText[order]}. This build (GUID ${buildGuid}, commit ${buildCommit ?: 'unknown'}) is not highFidelity, so this only marks it UNSTABLE."
+            echo "WARNING: ${message}"
+            unstable(message)
         }
     }
 }

@@ -5,6 +5,9 @@ see [Versioning](README.md#versioning). Newest first within each tool.
 
 ## deployStandardProteomicsService
 
+### deployStandardProteomicsService/v2.2.0 - 2026-10-07
+New `highFidelity` (default: true on tag builds, false otherwise), passed on to deployService/v2.1.0.
+
 ### deployStandardProteomicsService/v2.1.0 - 2026-10-07
 New input `imageRegistry` (default `docker.artifactory.imp.ac.at`), passed on to deployService v2.0.0. Every build that pushes now
 gets the always-on image coherence check, which can fail a build whose pushed image was made by another build; see deployService/v2.0.0.
@@ -29,6 +32,12 @@ First release: the protchem conventions on top of deployService. It sets:
 All of them can be overridden, and `null` removes a default build arg.
 
 ## deployService
+
+### deployService/v2.1.0 - 2026-10-07
+The image coherence check now follows a stricter rule. Every image gets three labels (run GUID, build category, commit). After the pipeline the
+pushed image must carry this run's GUID; otherwise another build category (or none) fails the build, the same category and commit only warns,
+and the same category with another commit fails with the new optional input `highFidelity` and otherwise marks the build UNSTABLE, saying whether
+the image is older or newer. Builds that push nothing are not checked. A check that cannot run only marks the build UNSTABLE.
 
 ### deployService/v2.0.0 - 2026-10-07
 Breaking: `imageRegistry` is a required input (deployStandardProteomicsService supplies it).

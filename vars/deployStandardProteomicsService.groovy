@@ -1,5 +1,5 @@
 /**
- * Version 2.1.0 - released as tag deployStandardProteomicsService/v2.1.0 (see CHANGELOG.md). Bump both with every change to this file.
+ * Version 2.2.0 - released as tag deployStandardProteomicsService/v2.2.0 (see CHANGELOG.md). Bump both with every change to this file.
  *
  * The VBC proteomics (protchem) service conventions on top of deployService: it fills in the
  * standard namespace, branches, build args, secrets, tests and notification, so a standard
@@ -44,8 +44,10 @@
  *                              kind: 'usernamePassword']
  *   defaultSecrets          false to start from no standard secrets
  *   imageRegistry           'docker.artifactory.imp.ac.at', the registry the image is pushed to. After every build that pushes,
- *                           deployService checks that the pushed image carries this run's own GUID label (always on);
- *                           see deployService. It reports after the deploy that the deployed state is wrong.
+ *                           deployService checks that the pushed image is this run's or at least comes from the same kind of build
+ *                           (always on; see deployService). It reports after the deploy that the deployed state is wrong.
+ *   highFidelity            true on tag builds, false otherwise; the Map input overrides it. With it, the check fails the build when
+ *                           the pushed image holds another commit than the one built, without it the build only goes UNSTABLE.
  *   cockpitNotify           [credentialsId: 'vbc-cockpit-service-bus-send']; a Map replaces it; false = off
  */
 def call(Map config = [:]) {
@@ -72,6 +74,7 @@ def call(Map config = [:]) {
         ocpSmokeExtraChecks: runTests ? config.ocpSmokeExtraChecks : null,
         cockpitNotify      : cockpitNotification,
         imageRegistry      : config.imageRegistry ?: 'docker.artifactory.imp.ac.at',
+        highFidelity       : config.highFidelity != null ? config.highFidelity : (env.TAG_NAME != null),
     ]
     List<String> handledInputNames = [
         'imageNamespace',
@@ -91,6 +94,7 @@ def call(Map config = [:]) {
         'ocpSmokeExtraChecks',
         'cockpitNotify',
         'imageRegistry',
+        'highFidelity',
     ]
     Map passThroughParameters = config.findAll { inputName, inputValue -> !(inputName in handledInputNames) }
 
@@ -101,7 +105,7 @@ def call(Map config = [:]) {
 }
 
 // This tool's own version; bump it (and tag deployStandardProteomicsService/vX.Y.Z) with every change to this file.
-private String toolVersion() { return '2.1.0' }
+private String toolVersion() { return '2.2.0' }
 
 private void failOnInvalidConfiguration(Map config) {
     List<String> requiredInputNames = [

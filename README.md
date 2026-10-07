@@ -17,22 +17,41 @@ Small, reusable [Jenkins shared library](https://www.jenkins.io/doc/book/pipelin
 
 ## Image coherence check
 
-Always on, nothing to configure. `buildDockerImage` names its local image after the commit, so two builds of the same
-commit on one agent (the branch build and the tag build, in either direction) can overwrite each other's image before the
-push, and a tag then points to the other build's image. Seen 2026-10-06: `hive.proteomicstime` `v2.43.0` and `labvz`
-`v1.33.0` were released with version `0.0.0`, because the tag pointed to the branch build's image.
+Always on for every build that pushes an image (a pull request, or a branch that is not in `pushBranches`, is not checked at
+all). `buildDockerImage` names its local image after the commit, so two builds of the same commit on one agent (the branch
+build and the tag build, in either direction) can overwrite each other's image before the push, and a tag then points to the
+other build's image. Seen 2026-10-06: `hive.proteomicstime` `v2.43.0` and `labvz` `v1.33.0` were released with version `0.0.0`,
+because the tag pointed to the branch build's image.
 
-`deployService` therefore generates a GUID for every pipeline run and has it put on the image as the label
-`coherence_guid_5ab99355877948ccbde41c74e4a95bdd` (the label name carries a fixed GUID of this tool, so it cannot collide
-with another label; the value is the run's GUID). After the pipeline it pulls the image this build pushed
-(`<imageRegistry>/<imageNamespace>/<imageName>:<tag>`; for a tag build the tag, for a branch build the branch tag when the
-branch is in `pushBranches`) and checks that it carries the run's GUID.
+`deployService` puts three labels on every image, all named with a fixed GUID of this tool so they cannot collide with any
+other label:
+
+| Label | Value |
+| --- | --- |
+| `coherence_guid_5ab99355877948ccbde41c74e4a95bdd` | a GUID generated for this pipeline run |
+| `provenance_label_5ab99355877948ccbde41c74e4a95bdd` | the build category: the tag name for a tag build, the branch name for a branch build (only if it consists of docker tag characters, because it goes into a shell command line) |
+| `coherence_commit_5ab99355877948ccbde41c74e4a95bdd` | the commit the build builds (from a checkout of its own, because `GIT_COMMIT` is not set yet when the labels are decided) |
+
+After the pipeline it pulls the image this build pushed (`<imageRegistry>/<imageNamespace>/<imageName>:<tag>`; for a tag build
+the tag, for a branch build the branch tag) and checks it, in this order:
+
+1. It carries this run's GUID: fine.
+2. Another build category, or none: **fails**, whatever `highFidelity` says. The tag holds an image made by a different kind of
+   build (the tag build's image under `master`, or the branch build's image under `v1.2.3`).
+3. Same category and same commit: fine, only a warning that it came from a different run.
+4. Same category, different commit: with `highFidelity` it **fails**. Without it the build is **UNSTABLE** and the log says
+   whether the image is older (an older build overwrote this one), newer (a newer build replaced it, for example two quick
+   pushes to `master`), or of unknown order. The order is decided by git ancestry in a checkout of this build; a commit that
+   is not in that checkout is reported as most likely newer, one in unrelated history as unrelated.
+
+`highFidelity` is an optional input of `deployService` (default false). `deployStandardProteomicsService` sets it to true on
+tag builds and false otherwise; passing `highFidelity` there overrides that.
 
 It is a detector, not a prevention. The push and the Tower deploy happen inside `buildDockerImage`, so the check runs after
-them. When it fails, the build fails with a message saying that the wrong state was found after the pipeline had finished,
-that the deployed state is most likely wrong, and that it has to be redone (let the other build finish, re-run this build,
-redeploy). A check that cannot run (the pull or inspect fails) only marks the build UNSTABLE. Prevention needs
-`buildDockerImage` to name its local image per build, or the builds of one commit to be serialized.
+them. A failure says that the wrong state was found after the pipeline had finished, that the deployed state is most likely
+wrong, and that it has to be redone (let the other build finish, re-run this build, redeploy). A check that cannot run (the
+pull or inspect fails) only marks the build UNSTABLE. Prevention needs `buildDockerImage` to name its local image per build,
+or the builds of one commit to be serialized.
 
 ## Versioning
 
@@ -114,7 +133,8 @@ deployStandardProteomicsService(
 | `buildArgs` | `NUGET_REPO_USER=vbc-proteomics`, `MINVER_VERSION_OVERRIDE=<tag without v>`, `APP_USER=app`, `APP_GROUP_GID=0`, `TEST_RESULTS_FOLDER=<testResultsFolder>`, `SEQ_VERSION=2026.1.17044` | Merged over the defaults; any new names work, and `null` removes one (e.g. `[SEQ_VERSION: null]` for no Seq). `defaultBuildArgs: false` starts empty (`dockerHttpPort` still applies) |
 | `secrets` | `SECRETS-NUGET-REPO-PW` from `vbc-proteomics-github-pat` | Merged by `id`; any new secrets work. `defaultSecrets: false` starts empty |
 | `cockpitNotify` | `[credentialsId: 'vbc-cockpit-service-bus-send']` | Another Map, or `false` |
-| `imageRegistry` | `docker.artifactory.imp.ac.at` | any host. Where the image is pushed. Also used by the always-on image coherence check (see `deployService`) |
+| `imageRegistry` | `docker.artifactory.imp.ac.at` | any host. Where the image is pushed. Also used by the always-on image coherence check (see below) |
+| `highFidelity` | `true` on tag builds, `false` otherwise | `true` or `false`. With it, the image coherence check fails the build when the pushed image holds another commit than the one built; without it the build is only UNSTABLE |
 
 `testScript` and `ocpSmokeExtraChecks` pass through when tests are on. Anything else is passed straight to `deployService`, e.g. `towerJobs` and the actions.
 
@@ -158,6 +178,7 @@ It runs these steps:
 | `tower` | no | `[staging, stagingBranch, production, imageTagVariable]`. Each job needs its companion value. `towerJobs` passes a raw `buildDockerImage` map instead |
 | `testResultsFolder`, `testScript`, `ocpSmoke`, `ocpSmokeExtraChecks` | no | The test step runs only when one of these is set. `testScript` needs `testResultsFolder`, and the extra checks need `ocpSmoke: true` |
 | `imageRegistry` | yes | The registry host the image is pushed to, e.g. `docker.artifactory.imp.ac.at` |
+| `highFidelity` | no | Default false. `true` makes the image coherence check fail (instead of UNSTABLE) when the pushed image holds another commit than the one built |
 | `cockpitNotify` | no | `[credentialsId: …]` or `[connectionString: …]`. A pipeline secret, never passed to the image |
 | `beforeBuild`, `afterBuild`, `afterAlways` | no | A Closure or a List of Closures |
 
