@@ -5,6 +5,10 @@ see [Versioning](README.md#versioning). Newest first within each tool.
 
 ## deployStandardProteomicsService
 
+### deployStandardProteomicsService/v2.1.0 - 2026-10-07
+New input `imageRegistry` (default `docker.artifactory.imp.ac.at`), passed on to deployService v2.0.0. Every build that pushes now
+gets the always-on image coherence check, which can fail a build whose pushed image was made by another build; see deployService/v2.0.0.
+
 ### deployStandardProteomicsService/v2.0.0 - 2026-09-29
 Breaking:
 - `dockerContext` is required (no longer left to buildDockerImage's default).
@@ -25,6 +29,17 @@ First release: the protchem conventions on top of deployService. It sets:
 All of them can be overridden, and `null` removes a default build arg.
 
 ## deployService
+
+### deployService/v2.0.0 - 2026-10-07
+Breaking: `imageRegistry` is a required input (deployStandardProteomicsService supplies it).
+
+New: an always-on image coherence check. Context: `v2.43.0` of hive.proteomicstime and `v1.33.0` of labvz were released with version
+`0.0.0`, although their tag builds passed `MINVER_VERSION_OVERRIDE` correctly. The registry image of both tags was made by the branch
+build of the same commit: buildDockerImage names the local image after the commit, so the two builds, started 0.6 s apart on one
+agent, overwrote each other's image before the push. Each pipeline run now generates a GUID, puts it on its image as the label
+`coherence_guid_5ab99355877948ccbde41c74e4a95bdd` (through extraBuildArgs), and after the pipeline pulls the image it pushed and checks
+that it carries that GUID. It is a detector: the push and Tower run inside buildDockerImage, so it reports after the deploy that the
+deployed state is most likely wrong and has to be redone. A check that cannot run only marks the build UNSTABLE.
 
 ### deployService/v1.0.1 - 2026-09-29
 Readability restructuring with no behaviour change: named variables and closure parameters, and the

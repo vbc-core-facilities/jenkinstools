@@ -1,5 +1,5 @@
 /**
- * Version 2.0.0 - released as tag deployStandardProteomicsService/v2.0.0 (see CHANGELOG.md). Bump both with every change to this file.
+ * Version 2.1.0 - released as tag deployStandardProteomicsService/v2.1.0 (see CHANGELOG.md). Bump both with every change to this file.
  *
  * The VBC proteomics (protchem) service conventions on top of deployService: it fills in the
  * standard namespace, branches, build args, secrets, tests and notification, so a standard
@@ -43,6 +43,9 @@
  *                             [id: 'SECRETS-NUGET-REPO-PW', credentialsId: 'vbc-proteomics-github-pat',
  *                              kind: 'usernamePassword']
  *   defaultSecrets          false to start from no standard secrets
+ *   imageRegistry           'docker.artifactory.imp.ac.at', the registry the image is pushed to. After every build that pushes,
+ *                           deployService checks that the pushed image carries this run's own GUID label (always on);
+ *                           see deployService. It reports after the deploy that the deployed state is wrong.
  *   cockpitNotify           [credentialsId: 'vbc-cockpit-service-bus-send']; a Map replaces it; false = off
  */
 def call(Map config = [:]) {
@@ -68,6 +71,7 @@ def call(Map config = [:]) {
         ocpSmoke           : runTests && config.ocpSmoke != false,
         ocpSmokeExtraChecks: runTests ? config.ocpSmokeExtraChecks : null,
         cockpitNotify      : cockpitNotification,
+        imageRegistry      : config.imageRegistry ?: 'docker.artifactory.imp.ac.at',
     ]
     List<String> handledInputNames = [
         'imageNamespace',
@@ -86,6 +90,7 @@ def call(Map config = [:]) {
         'ocpSmoke',
         'ocpSmokeExtraChecks',
         'cockpitNotify',
+        'imageRegistry',
     ]
     Map passThroughParameters = config.findAll { inputName, inputValue -> !(inputName in handledInputNames) }
 
@@ -96,7 +101,7 @@ def call(Map config = [:]) {
 }
 
 // This tool's own version; bump it (and tag deployStandardProteomicsService/vX.Y.Z) with every change to this file.
-private String toolVersion() { return '2.0.0' }
+private String toolVersion() { return '2.1.0' }
 
 private void failOnInvalidConfiguration(Map config) {
     List<String> requiredInputNames = [

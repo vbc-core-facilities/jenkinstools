@@ -15,6 +15,25 @@ Small, reusable [Jenkins shared library](https://www.jenkins.io/doc/book/pipelin
 
 **Requirements:** the steps run inside `node {}` and use `sh` and `curl` (7.55 or newer). `serviceBusNotify` with a connection string also needs `openssl` on the agent. `deployService` also needs IT's `buildDockerImage` (the implicitly loaded `vbc-cicd` library).
 
+## Image coherence check
+
+Always on, nothing to configure. `buildDockerImage` names its local image after the commit, so two builds of the same
+commit on one agent (the branch build and the tag build, in either direction) can overwrite each other's image before the
+push, and a tag then points to the other build's image. Seen 2026-10-06: `hive.proteomicstime` `v2.43.0` and `labvz`
+`v1.33.0` were released with version `0.0.0`, because the tag pointed to the branch build's image.
+
+`deployService` therefore generates a GUID for every pipeline run and has it put on the image as the label
+`coherence_guid_5ab99355877948ccbde41c74e4a95bdd` (the label name carries a fixed GUID of this tool, so it cannot collide
+with another label; the value is the run's GUID). After the pipeline it pulls the image this build pushed
+(`<imageRegistry>/<imageNamespace>/<imageName>:<tag>`; for a tag build the tag, for a branch build the branch tag when the
+branch is in `pushBranches`) and checks that it carries the run's GUID.
+
+It is a detector, not a prevention. The push and the Tower deploy happen inside `buildDockerImage`, so the check runs after
+them. When it fails, the build fails with a message saying that the wrong state was found after the pipeline had finished,
+that the deployed state is most likely wrong, and that it has to be redone (let the other build finish, re-run this build,
+redeploy). A check that cannot run (the pull or inspect fails) only marks the build UNSTABLE. Prevention needs
+`buildDockerImage` to name its local image per build, or the builds of one commit to be serialized.
+
 ## Versioning
 
 **Every tool in this library is versioned, independently of the others. There are no unversioned consumers.**
@@ -95,6 +114,7 @@ deployStandardProteomicsService(
 | `buildArgs` | `NUGET_REPO_USER=vbc-proteomics`, `MINVER_VERSION_OVERRIDE=<tag without v>`, `APP_USER=app`, `APP_GROUP_GID=0`, `TEST_RESULTS_FOLDER=<testResultsFolder>`, `SEQ_VERSION=2026.1.17044` | Merged over the defaults; any new names work, and `null` removes one (e.g. `[SEQ_VERSION: null]` for no Seq). `defaultBuildArgs: false` starts empty (`dockerHttpPort` still applies) |
 | `secrets` | `SECRETS-NUGET-REPO-PW` from `vbc-proteomics-github-pat` | Merged by `id`; any new secrets work. `defaultSecrets: false` starts empty |
 | `cockpitNotify` | `[credentialsId: 'vbc-cockpit-service-bus-send']` | Another Map, or `false` |
+| `imageRegistry` | `docker.artifactory.imp.ac.at` | any host. Where the image is pushed. Also used by the always-on image coherence check (see `deployService`) |
 
 `testScript` and `ocpSmokeExtraChecks` pass through when tests are on. Anything else is passed straight to `deployService`, e.g. `towerJobs` and the actions.
 
@@ -132,11 +152,12 @@ It runs these steps:
 
 | Input | Required | Meaning |
 | --- | --- | --- |
-| `imageName`, `dockerFile`, `imageNamespace`, `pushBranches` | yes | Image `<imageNamespace>/<imageName>`, pushed on `pushBranches` (a list, which may be empty). `dockerContext` is optional |
+| `imageName`, `dockerFile`, `imageNamespace`, `imageRegistry`, `pushBranches` | yes | Image `<imageNamespace>/<imageName>`, pushed on `pushBranches` (a list, which may be empty). `dockerContext` is optional |
 | `buildArgs` | no | Map of any build args |
 | `secrets` | no | BuildKit secrets `[[id: '…', credentialsId: '…', kind: 'usernamePassword' \| 'string'], …]`, never passed as build args or shown in logs |
 | `tower` | no | `[staging, stagingBranch, production, imageTagVariable]`. Each job needs its companion value. `towerJobs` passes a raw `buildDockerImage` map instead |
 | `testResultsFolder`, `testScript`, `ocpSmoke`, `ocpSmokeExtraChecks` | no | The test step runs only when one of these is set. `testScript` needs `testResultsFolder`, and the extra checks need `ocpSmoke: true` |
+| `imageRegistry` | yes | The registry host the image is pushed to, e.g. `docker.artifactory.imp.ac.at` |
 | `cockpitNotify` | no | `[credentialsId: …]` or `[connectionString: …]`. A pipeline secret, never passed to the image |
 | `beforeBuild`, `afterBuild`, `afterAlways` | no | A Closure or a List of Closures |
 

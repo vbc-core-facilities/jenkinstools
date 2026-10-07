@@ -1,5 +1,5 @@
 /**
- * Version 1.0.1 - released as tag deployService/v1.0.1 (see CHANGELOG.md). Bump both with every change to this file.
+ * Version 2.0.0 - released as tag deployService/v2.0.0 (see CHANGELOG.md). Bump both with every change to this file.
  *
  * Generic service pipeline wiring on top of IT's buildDockerImage (vbc-cicd), with NO defaults:
  * nothing is assumed, every value comes from the caller, and every optional feature is off unless
@@ -12,6 +12,7 @@
  *   imageName            image name, pushed as <imageNamespace>/<imageName>
  *   dockerFile           path to the Dockerfile
  *   imageNamespace       registry namespace
+ *   imageRegistry        registry host the image is pushed to, e.g. docker.artifactory.imp.ac.at (the coherence check pulls from it)
  *   pushBranches         List of branches whose images are pushed (may be empty)
  *   dockerContext        optional build context; buildDockerImage's own default ('.') when omitted
  *
@@ -34,6 +35,19 @@
  *                        (needs testResultsFolder); a non-zero exit marks the build UNSTABLE
  *   ocpSmoke             true to run the OCP arbitrary-UID probe-mechanics smoke
  *   ocpSmokeExtraChecks  List of extra shell lines for the smoke (no single quotes)
+ *
+
+ * Image coherence check (always on, nothing to configure):
+ *   Each pipeline run generates a GUID and has it put on its image as the label coherence_guid_5ab99355877948ccbde41c74e4a95bdd (through
+ *   buildDockerImage's extraBuildArgs). After the pipeline, the image this build pushed (<imageRegistry>/<imageNamespace>/
+ *   <imageName>:<tag>, for a tag build the tag, for a branch build the branch tag when the branch is in pushBranches) is
+ *   pulled and must carry that same GUID. If it does not, the image under that tag was made by another build.
+ *   Why: buildDockerImage names the local image after the commit, so two builds of the same commit on one agent (the branch
+ *   build and the tag build, in either direction) can overwrite each other's image before the push, and a tag then points to
+ *   the other build's image (seen 2026-10-06: tags v2.43.0 / v1.33.0 released as 0.0.0).
+ *   A DETECTOR, not a prevention: the push and the Tower deploy happen inside buildDockerImage, so the check runs after them.
+ *   When it fails the build says so: the wrong state was found after the pipeline had finished, the deployed state is most
+ *   likely wrong and has to be redone. A check that cannot run (pull or inspect fails) only marks the build UNSTABLE.
  *
  * Notification (optional):
  *   cockpitNotify        [credentialsId: '...'] or [connectionString: '...'] plus any
@@ -62,7 +76,9 @@ def call(Map config = [:]) {
     }
     List<String> secretFlags = buildKitSecrets.collect { Map buildKitSecret -> buildKitSecretFlag(buildKitSecret) }
     List<String> secretIds = buildKitSecrets.collect { Map buildKitSecret -> buildKitSecret.id as String }
-    String extraBuildArguments = (buildArgumentFlags + secretFlags).join(' ')
+    String buildGuid = UUID.randomUUID().toString()
+    String buildGuidFlag = "--label ${buildGuidLabelName()}=${buildGuid}".toString()
+    String extraBuildArguments = (buildArgumentFlags + secretFlags + [buildGuidFlag]).join(' ')
 
     // ---- tower ------------------------------------------------------------------------------------------
     Map towerJobs = config.towerJobs ?: toTowerJobs(config.tower, imageTag)
@@ -91,6 +107,7 @@ def call(Map config = [:]) {
     try {
         runActions(config.beforeBuild)
         buildDockerImage(buildDockerImageParameters)
+        verifyPushedImageCoherence(config, buildGuid)
         runActions(config.afterBuild)
     } catch (buildFailure) {
         currentBuild.result = 'FAILURE' // so the 'finished' notification reports the real result
@@ -105,7 +122,7 @@ def call(Map config = [:]) {
 }
 
 // This tool's own version; bump it (and tag deployService/vX.Y.Z) with every change to this file.
-private String toolVersion() { return '1.0.1' }
+private String toolVersion() { return '2.0.0' }
 
 // ---- validation --------------------------------------------------------------------------------------
 
@@ -126,6 +143,7 @@ private List<String> requiredInputProblems(Map config) {
         'imageName',
         'dockerFile',
         'imageNamespace',
+        'imageRegistry',
     ]
     List<String> missingInputNames = requiredInputNames.findAll { String inputName -> !config[inputName] }
     List<String> missingInputProblems = missingInputNames.collect { String inputName -> "${inputName} is required".toString() }
@@ -275,6 +293,57 @@ private void notifyCockpit(Map cockpitNotification, String event) {
             throw failure
         }
         echo "WARNING: deployService: cockpit '${event}' notification failed: ${failure.message} - continuing"
+    }
+}
+
+// ---- image coherence check -----------------------------------------------------------------------------------
+
+// The label this library puts on its own image (through buildDockerImage's extraBuildArgs), carrying the pipeline run's GUID.
+private String buildGuidLabelName() { return 'coherence_guid_5ab99355877948ccbde41c74e4a95bdd' }
+
+// The one image this build pushed: a tag build the tag, a branch build its branch tag. null when this build pushes nothing.
+private String pushedImageTag(Map config) {
+    if (env.TAG_NAME) {
+        return env.TAG_NAME as String
+    }
+    String branch = env.BRANCH_NAME as String
+    return branch && (config.pushBranches ?: []).contains(branch) ? branch : null
+}
+
+// After the pipeline: the image under the pushed tag must carry the GUID this run put on its own image.
+private void verifyPushedImageCoherence(Map config, String buildGuid) {
+    String tag = pushedImageTag(config)
+    if (tag == null) {
+        return
+    }
+    String pushedImage = "${config.imageRegistry}/${config.imageNamespace}/${config.imageName}:${tag}".toString()
+    node {
+        stage('Verify image coherence') {
+            String labelledGuid
+            try {
+                sh(script: "docker pull -q ${pushedImage}", label: 'pull the pushed image')
+                labelledGuid = sh(
+                    script: "docker image inspect --format '{{index .Config.Labels \"${buildGuidLabelName()}\"}}' ${pushedImage}",
+                    returnStdout: true,
+                    label: 'read the build GUID the pushed image carries'
+                ).trim()
+            } catch (InterruptedException aborted) {
+                throw aborted
+            } catch (Exception unreadable) {
+                unstable("Image coherence could not be checked after the push, verify by hand (${pushedImage}): ${unreadable.message}")
+                return
+            } finally {
+                sh(script: "docker image rm ${pushedImage} || true", label: 'remove the pulled image')
+            }
+            if (labelledGuid != buildGuid) {
+                error("IMAGE COHERENCE CHECK FAILED AFTER THE PIPELINE HAD ALREADY PUSHED AND DEPLOYED. This run put the build GUID ${buildGuid} on its image, " +
+                    "but ${pushedImage} carries ${labelledGuid ?: 'none'}: it was made by another build. " +
+                    "This was found only now, after the push and the Tower deployment had finished, so whatever was deployed from this tag is most likely " +
+                    "the wrong image: the deployed state is most likely wrong and has to be redone. " +
+                    "Cause: another build of the same commit on the same agent re-pointed the shared local image name before the push. " +
+                    "Redo: let the other build finish, re-run this build, and redeploy.")
+            }
+        }
     }
 }
 
