@@ -1,5 +1,5 @@
 /**
- * Version 2.1.1 - released as tag deployService/v2.1.1 (see CHANGELOG.md). Bump both with every change to this file.
+ * Version 2.2.0 - released as tag deployService/v2.2.0 (see CHANGELOG.md). Bump both with every change to this file.
  *
  * Generic service pipeline wiring on top of IT's buildDockerImage (vbc-cicd), with NO defaults:
  * nothing is assumed, every value comes from the caller, and every optional feature is off unless
@@ -147,7 +147,7 @@ def call(Map config = [:]) {
 }
 
 // This tool's own version; bump it (and tag deployService/vX.Y.Z) with every change to this file.
-private String toolVersion() { return '2.1.1' }
+private String toolVersion() { return '2.2.0' }
 
 // ---- validation --------------------------------------------------------------------------------------
 
@@ -307,8 +307,11 @@ private void notifyCockpit(Map cockpitNotification, String event) {
         return
     }
     try {
-        node {
-            vbcDeploymentCockpitNotify(event, cockpitNotification) // credentialsId or connectionString, + options
+        // its own stage, so that it is not shown as part of whatever stage ran before it (e.g. 'Verify image coherence')
+        stage("Cockpit notification: ${event}") {
+            node {
+                vbcDeploymentCockpitNotify(event, cockpitNotification) // credentialsId or connectionString, + options
+            }
         }
     } catch (InterruptedException aborted) {
         throw aborted
@@ -416,6 +419,14 @@ private void verifyPushedImageCoherence(Map config, String buildGuid, String bui
         stage('Verify image coherence') {
             String knownIssue = "KNOWN ISSUE: the image coherence check failing is a known problem, caused by a race condition between builds sharing a local image name, and VBC IT stated they have no plans to fix it. Reference: https://vbc.atlassian.net/servicedesk/customer/portal/5/ISD-60715"
 
+            echo "IMAGE COHERENCE CHECK - why this step exists:\n" +
+                "  In general: a pushed image is what gets deployed, and the only way to be sure that the image under the pushed tag is the one this run built " +
+                "is to look at the registry after the push. Nothing earlier can prove it, so the pushed image is pulled again and its labels are compared with this run's.\n" +
+                "  Specifically in the VBC deployment pipeline: buildDockerImage names its local image after the commit, so two builds of the same commit on one agent " +
+                "(e.g. the branch build and the tag build) share that name. This is a race condition: one build can overwrite the other's local image before it is pushed, " +
+                "and a tag then points to the other build's image (seen 2026-10-06: hive.proteomicstime v2.43.0 and labvz v1.33.0 were released with version 0.0.0). " +
+                "It is known to VBC IT, who have no plans to fix it: https://vbc.atlassian.net/servicedesk/customer/portal/5/ISD-60715"
+
             String labelledGuid
             String labelledCategory
             String labelledCommit
@@ -424,6 +435,7 @@ private void verifyPushedImageCoherence(Map config, String buildGuid, String bui
                 labelledGuid = labelOf(pushedImage, buildGuidLabelName())
                 labelledCategory = labelOf(pushedImage, buildCategoryLabelName())
                 labelledCommit = labelOf(pushedImage, buildCommitLabelName())
+                echo "Image coherence: pulled ${pushedImage} and read its three labels."
             } catch (InterruptedException aborted) {
                 throw aborted
             } catch (Exception unreadable) {
@@ -433,8 +445,18 @@ private void verifyPushedImageCoherence(Map config, String buildGuid, String bui
                 sh(script: "docker image rm ${pushedImage} || true", label: 'remove the pulled image')
             }
 
+            // the outcome of all three comparisons, shown whatever the verdict is
+            String guidOutcome = labelledGuid == buildGuid ? 'MATCH' : 'DIFFERENT'
+            String categoryOutcome = buildCategory == null ? 'UNKNOWN (this run\'s build category could not be determined)' : (labelledCategory == buildCategory ? 'MATCH' : 'DIFFERENT')
+            String commitOutcome = buildCommit == null ? 'UNKNOWN (this run\'s commit could not be determined)' : (labelledCommit == buildCommit ? 'MATCH' : 'DIFFERENT')
+            echo "Image coherence: comparison of ${pushedImage} with this run:\n" +
+                "  coherence GUID   : pushed ${labelledGuid ?: 'none'} | this run ${buildGuid} -> ${guidOutcome}\n" +
+                "  provenance label : pushed ${labelledCategory ?: 'none'} | this run ${buildCategory ?: 'unknown'} -> ${categoryOutcome}\n" +
+                "  coherence commit : pushed ${labelledCommit ?: 'none'} | this run ${buildCommit ?: 'unknown'} -> ${commitOutcome}"
+
             // 1. this run's own image
             if (labelledGuid == buildGuid) {
+                echo "Image coherence check PASSED: the pushed image carries this run's GUID, so it is the image this run built."
                 return
             }
             String shown = "${pushedImage} (build category ${labelledCategory ?: 'none'}, commit ${labelledCommit ?: 'none'}, GUID ${labelledGuid ?: 'none'})"
@@ -453,6 +475,7 @@ private void verifyPushedImageCoherence(Map config, String buildGuid, String bui
             if (buildCommit != null && labelledCommit == buildCommit) {
                 echo "WARNING: image coherence: ${shown} was made by another run of the same build category and commit as this run (GUID ${buildGuid}). " +
                     "It is the same code, but it did not come from this run."
+                echo "Image coherence check PASSED WITH A WARNING: same build category and commit as this run, but another run's image (see above)."
                 return
             }
 

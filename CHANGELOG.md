@@ -5,6 +5,9 @@ see [Versioning](README.md#versioning). Newest first within each tool.
 
 ## deployStandardProteomicsService
 
+### deployStandardProteomicsService/v2.2.2 - 2026-10-08
+No change of its own; released so that tag-pinned Jenkinsfiles pick up deployService/v2.2.0.
+
 ### deployStandardProteomicsService/v2.2.1 - 2026-10-08
 No change of its own; released so that tag-pinned Jenkinsfiles pick up deployService/v2.1.1 (known-issue note on image coherence check failures).
 
@@ -35,6 +38,15 @@ First release: the protchem conventions on top of deployService. It sets:
 All of them can be overridden, and `null` removes a default build arg.
 
 ## deployService
+
+### deployService/v2.2.0 - 2026-10-08
+The `Verify image coherence` stage now explains itself in the build log:
+- It starts with why the check exists: in general (the pushed image is what gets deployed, so it is verified after the push) and in the VBC pipeline
+  (the race condition between builds sharing a local image name, known to VBC IT, with the ISD-60715 reference).
+- It logs when the image was pulled and its labels read, and the outcome (MATCH / DIFFERENT / UNKNOWN) of all three comparisons: coherence GUID,
+  provenance label (build category) and coherence commit.
+- It ends with an explicit PASSED (or PASSED WITH A WARNING) line when the check is successful.
+- The cockpit `started` / `finished` notifications run in their own stages (`Cockpit notification: <event>`), no longer shown as part of the stage before them.
 
 ### deployService/v2.1.1 - 2026-10-08
 When the image coherence check fails (or marks the build UNSTABLE), the message and the docs now note that this is a known issue caused by a race condition, and that VBC IT stated
