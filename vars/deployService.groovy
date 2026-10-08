@@ -1,5 +1,5 @@
 /**
- * Version 2.1.0 - released as tag deployService/v2.1.0 (see CHANGELOG.md). Bump both with every change to this file.
+ * Version 2.1.1 - released as tag deployService/v2.1.1 (see CHANGELOG.md). Bump both with every change to this file.
  *
  * Generic service pipeline wiring on top of IT's buildDockerImage (vbc-cicd), with NO defaults:
  * nothing is assumed, every value comes from the caller, and every optional feature is off unless
@@ -49,6 +49,9 @@
  *   After the pipeline, the image this build pushed (<imageRegistry>/<imageNamespace>/<imageName>:<tag>; for a tag build the
  *   tag, for a branch build the branch tag when the branch is in pushBranches) is pulled and checked. A build that pushes
  *   nothing (pull request, branch not in pushBranches) is not checked at all.
+ *   Known issue: the check failing is a known problem, caused by a race condition between builds sharing a local image name.
+ *   VBC IT stated they have no plans to fix it (https://vbc.atlassian.net/servicedesk/customer/portal/5/ISD-60715); the
+ *   failure and UNSTABLE messages say so.
  *     1. It carries this run's GUID: fine.
  *     2. Another category, or none: FAILS, whatever highFidelity says. The tag holds an image made by a different kind of
  *        build (the tag build's image under master, or the branch build's image under v1.2.3).
@@ -144,7 +147,7 @@ def call(Map config = [:]) {
 }
 
 // This tool's own version; bump it (and tag deployService/vX.Y.Z) with every change to this file.
-private String toolVersion() { return '2.1.0' }
+private String toolVersion() { return '2.1.1' }
 
 // ---- validation --------------------------------------------------------------------------------------
 
@@ -411,6 +414,8 @@ private void verifyPushedImageCoherence(Map config, String buildGuid, String bui
     boolean highFidelity = config.highFidelity == true
     node {
         stage('Verify image coherence') {
+            String knownIssue = "KNOWN ISSUE: the image coherence check failing is a known problem, caused by a race condition between builds sharing a local image name, and VBC IT stated they have no plans to fix it. Reference: https://vbc.atlassian.net/servicedesk/customer/portal/5/ISD-60715"
+
             String labelledGuid
             String labelledCategory
             String labelledCommit
@@ -422,7 +427,7 @@ private void verifyPushedImageCoherence(Map config, String buildGuid, String bui
             } catch (InterruptedException aborted) {
                 throw aborted
             } catch (Exception unreadable) {
-                unstable("Image coherence could not be checked after the push, verify by hand (${pushedImage}): ${unreadable.message}")
+                unstable("Image coherence could not be checked after the push, verify by hand (${pushedImage}): ${unreadable.message}. ${knownIssue}")
                 return
             } finally {
                 sh(script: "docker image rm ${pushedImage} || true", label: 'remove the pulled image')
@@ -436,7 +441,7 @@ private void verifyPushedImageCoherence(Map config, String buildGuid, String bui
             String afterTheFact = "This was found only now, after the push and the Tower deployment had finished, so whatever was deployed from this tag " +
                 "is most likely the wrong image: the deployed state is most likely wrong and has to be redone. " +
                 "Cause: another build of the same commit on the same agent re-pointed the shared local image name before the push. " +
-                "Redo: let the other build finish, re-run this build, and redeploy."
+                "Redo: let the other build finish, re-run this build, and redeploy. " + knownIssue
 
             // 2. another category (or none): not acceptable
             if (buildCategory == null || labelledCategory != buildCategory) {
@@ -465,7 +470,7 @@ private void verifyPushedImageCoherence(Map config, String buildGuid, String bui
                 unrelated        : 'a commit unrelated to this build\'s commit (neither is an ancestor of the other, force-push?)',
                 unknown          : 'a commit whose order against this build could not be determined',
             ]
-            String message = "image coherence: ${shown} holds ${orderText[order]}. This build (GUID ${buildGuid}, commit ${buildCommit ?: 'unknown'}) is not highFidelity, so this only marks it UNSTABLE."
+            String message = "image coherence: ${shown} holds ${orderText[order]}. This build (GUID ${buildGuid}, commit ${buildCommit ?: 'unknown'}) is not highFidelity, so this only marks it UNSTABLE. ${knownIssue}"
             echo "WARNING: ${message}"
             unstable(message)
         }

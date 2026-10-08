@@ -33,6 +33,10 @@ All of them can be overridden, and `null` removes a default build arg.
 
 ## deployService
 
+### deployService/v2.1.1 - 2026-10-08
+When the image coherence check fails (or marks the build UNSTABLE), the message and the docs now note that this is a known issue caused by a race condition, and that VBC IT stated
+they have no plans to fix it, with a reference: https://vbc.atlassian.net/servicedesk/customer/portal/5/ISD-60715
+
 ### deployService/v2.1.0 - 2026-10-07
 The image coherence check now follows a stricter rule. Every image gets three labels (run GUID, build category, commit). After the pipeline the
 pushed image must carry this run's GUID; otherwise another build category (or none) fails the build, the same category and commit only warns,

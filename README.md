@@ -44,6 +44,9 @@ the tag, for a branch build the branch tag) and checks it, in this order:
    pushes to `master`), or of unknown order. The order is decided by git ancestry in a checkout of this build; a commit that
    is not in that checkout is reported as most likely newer, one in unrelated history as unrelated.
 
+**Known issue:** if a build fails this check for any reason, the underlying problem is known (a race condition between builds sharing a local image name), and VBC IT stated they have no plans to
+fix it. Reference: <https://vbc.atlassian.net/servicedesk/customer/portal/5/ISD-60715>. The failure and UNSTABLE messages say so too.
+
 `highFidelity` is an optional input of `deployService` (default false). `deployStandardProteomicsService` sets it to true on
 tag builds and false otherwise; passing `highFidelity` there overrides that.
 
