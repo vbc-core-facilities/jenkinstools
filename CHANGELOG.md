@@ -5,6 +5,9 @@ see [Versioning](README.md#versioning). Newest first within each tool.
 
 ## deployStandardProteomicsService
 
+### deployStandardProteomicsService/v2.2.1 - 2026-10-08
+No change of its own; released so that tag-pinned Jenkinsfiles pick up deployService/v2.1.1 (known-issue note on image coherence check failures).
+
 ### deployStandardProteomicsService/v2.2.0 - 2026-10-07
 New `highFidelity` (default: true on tag builds, false otherwise), passed on to deployService/v2.1.0.
 
