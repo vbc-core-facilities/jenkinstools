@@ -1,5 +1,5 @@
 /**
- * Version 2.2.2 - released as tag deployStandardProteomicsService/v2.2.2 (see CHANGELOG.md). Bump both with every change to this file.
+ * Version 2.2.3 - released as tag deployStandardProteomicsService/v2.2.3 (see CHANGELOG.md). Bump both with every change to this file.
  *
  * The VBC proteomics (protchem) service conventions on top of deployService: it fills in the
  * standard namespace, branches, build args, secrets, tests and notification, so a standard
@@ -105,7 +105,7 @@ def call(Map config = [:]) {
 }
 
 // This tool's own version; bump it (and tag deployStandardProteomicsService/vX.Y.Z) with every change to this file.
-private String toolVersion() { return '2.2.2' }
+private String toolVersion() { return '2.2.3' }
 
 private void failOnInvalidConfiguration(Map config) {
     List<String> requiredInputNames = [

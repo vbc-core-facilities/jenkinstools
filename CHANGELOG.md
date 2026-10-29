@@ -5,6 +5,9 @@ see [Versioning](README.md#versioning). Newest first within each tool.
 
 ## deployStandardProteomicsService
 
+### deployStandardProteomicsService/v2.2.3 - 2026-10-29
+No change of its own; released so that tag-pinned Jenkinsfiles pick up deployService/v2.2.1 (in-image test step fix).
+
 ### deployStandardProteomicsService/v2.2.2 - 2026-10-08
 No change of its own; released so that tag-pinned Jenkinsfiles pick up deployService/v2.2.0.
 
@@ -38,6 +41,11 @@ First release: the protchem conventions on top of deployService. It sets:
 All of them can be overridden, and `null` removes a default build arg.
 
 ## deployService
+
+### deployService/v2.2.1 - 2026-10-29
+Fix: the in-image test step (`image.inside()`) failed on every image built to the OCP deployment standard with `Failed to run top ... container is not running`,
+marking the build UNSTABLE. `inside()` runs the container as the Jenkins agent's own uid:gid, while such images grant access to group 0 only (arbitrary-UID
+pattern), so the entrypoint could not be read and the container exited at once. The container now also gets group 0 (`--group-add 0`), as an arbitrary UID would.
 
 ### deployService/v2.2.0 - 2026-10-08
 The `Verify image coherence` stage now explains itself in the build log:

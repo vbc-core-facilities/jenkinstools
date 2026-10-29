@@ -1,5 +1,5 @@
 /**
- * Version 2.2.0 - released as tag deployService/v2.2.0 (see CHANGELOG.md). Bump both with every change to this file.
+ * Version 2.2.1 - released as tag deployService/v2.2.1 (see CHANGELOG.md). Bump both with every change to this file.
  *
  * Generic service pipeline wiring on top of IT's buildDockerImage (vbc-cicd), with NO defaults:
  * nothing is assumed, every value comes from the caller, and every optional feature is off unless
@@ -147,7 +147,7 @@ def call(Map config = [:]) {
 }
 
 // This tool's own version; bump it (and tag deployService/vX.Y.Z) with every change to this file.
-private String toolVersion() { return '2.2.0' }
+private String toolVersion() { return '2.2.1' }
 
 // ---- validation --------------------------------------------------------------------------------------
 
@@ -517,7 +517,9 @@ private Closure inImageTestStep(Map config) {
         if (testResultsFolder) {
             sh "mkdir -p ${workspaceResultsFolder}; chmod 777 ${workspaceResultsFolder}"
             try {
-                builtImage.image.inside() {
+                // inside() runs the container as the agent's uid:gid. Images built to the OCP standard grant
+                // access only to group 0 (arbitrary UID), so add it, or the entrypoint cannot even be read.
+                builtImage.image.inside('--group-add 0') {
                     if (config.testScript) {
                         int testScriptExitCode = sh(
                             script: "${config.testScript} ${testResultsFolder}",
