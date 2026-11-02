@@ -111,11 +111,12 @@ node {
         // over real xUnit and pytest output. The published result shows how aggregated tests look in this Jenkins.
         String ref = params.JENKINSTOOLS_REF ?: 'main'
         writeFile(file: '.jenkinstools/aggregate_junit.py', text: libraryResource('jenkinstools/aggregate_junit.py'))
+        // through git, not raw.githubusercontent: a test server's git redirect then serves its local jenkinstools
         sh(label: 'fetch fixtures', script: """
-            rm -rf demo-raw demo-aggregated; mkdir -p demo-raw
-            for f in xunit.xml pytest.xml; do
-              curl -sSf --max-time 20 -o demo-raw/\$f "https://raw.githubusercontent.com/vbc-core-facilities/jenkinstools/${ref}/test/aggregate_junit/fixtures/\$f"
-            done
+            rm -rf demo-raw demo-aggregated demo-src; mkdir -p demo-raw
+            git clone -q --depth 1 --branch '${ref}' https://github.com/vbc-core-facilities/jenkinstools.git demo-src
+            cp demo-src/test/aggregate_junit/fixtures/xunit.xml demo-src/test/aggregate_junit/fixtures/pytest.xml demo-raw/
+            rm -rf demo-src
             ls -la demo-raw
         """)
         docker.image(params.AGGREGATION_IMAGE).inside {
