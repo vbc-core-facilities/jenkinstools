@@ -142,6 +142,16 @@ First release (shipped in `v1`).
 ### buildEventMessage/v1.0.0 - 2026-09-28
 First release (shipped in `v1`): `jenkins-build-event/v1` messages.
 
+## testserver
+
+Not a library tool: the local Jenkins test server (`testserver/`), versioned with tags `testserver/vX.Y.Z` so that
+organisation presets (e.g. vbc_deployment `JenkinsTestServerVbc`) can name the release they were made with.
+
+### testserver/v1.0.0 - 2026-11-02
+First release: pinned Jenkins LTS and plugins, own `dind` daemon, JCasC with an overlay folder for presets, multibranch
+jobs over local repos (never built automatically), git redirects for libraries, `testserver.sh` CLI, MCP server and the
+`jenkins-testserver` skill. Build args `DOCKER_CLI_IMAGE` and `AGENT_APT_PACKAGES` let a preset match its real agents.
+
 ## Legacy
 
 `v1` (2026-09-28) is a whole-library tag from before per-tool versioning. It contains webhookNotify,

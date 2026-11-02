@@ -1,5 +1,7 @@
 # Jenkins test server
 
+Version 1.0.0 (tag `testserver/v1.0.0`; see `../CHANGELOG.md`).
+
 A local Jenkins that runs real Jenkinsfiles of local repos, so a pipeline change (a jenkinstools tool, a Jenkinsfile, a
 Dockerfile's test stage) can be tried end to end before it reaches a shared Jenkins. Generic: it knows no organisation.
 An organisation preset adds what makes it look like its own Jenkins (e.g. vbc_deployment `JenkinsTestServerVbc`: IT's
