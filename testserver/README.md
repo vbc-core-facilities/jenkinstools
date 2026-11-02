@@ -38,7 +38,7 @@ Jenkinsfile can name any local branch or tag. Make a local-only branch of the ap
 ## Settings
 
 See the header of `compose.yaml`: `TESTSERVER_REPOS_ROOT`, `TESTSERVER_REPOS`, `TESTSERVER_GIT_REDIRECTS`,
-`TESTSERVER_HTTP_BIND`, `TESTSERVER_INSECURE_REGISTRY`, `TESTSERVER_DIND_DNS`, `TESTSERVER_SYSTEM_MESSAGE`.
+`TESTSERVER_HTTP_HOST`, `TESTSERVER_HTTP_PORT`, `TESTSERVER_INSECURE_REGISTRY`, `TESTSERVER_DIND_DNS`, `TESTSERVER_SYSTEM_MESSAGE`.
 
 `TESTSERVER_DIND_DNS` matters on restricted networks: containers started by the inner daemon cannot use the compose
 network's resolver and fall back to 8.8.8.8. On Docker Desktop, `192.168.65.7` is the host's resolver.

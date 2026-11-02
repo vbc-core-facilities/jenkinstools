@@ -70,7 +70,8 @@ node {
         sh(label: 'rest', script: """
             set +e
             probe() {
-              code=\$(curl -sS -o /tmp/probe.body -w '%{http_code}' --max-time 20 "\$1")
+              # -g: the [] of tree= are not curl globs
+              code=\$(curl -gsS -o /tmp/probe.body -w '%{http_code}' --max-time 20 "\$1")
               echo "== \$code \$1"
               head -c 3000 /tmp/probe.body; echo
             }
