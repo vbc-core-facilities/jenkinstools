@@ -35,3 +35,13 @@ true for any branch, not only `pushBranches` (those only decide what gets pushed
 Pushing this file to jenkinstools itself triggers nothing: jenkinstools has no root `Jenkinsfile` and no Jenkins job.
 
 Prefer the local test server (vbc_deployment `JenkinsTestServerVbc`) for everything that does not need the real Jenkins.
+
+## Where it has run
+
+- **Test server, 2026-11-02** (local branch of hive.proteomicstime with this file as its root `Jenkinsfile`,
+  `JENKINSTOOLS_REF=feat/test-result-aggregation`): every section works. Anonymous REST answers 200 there because the test
+  server has no security; the build's libraries show `vbc-cicd` trusted and `jenkinstools` untrusted; the junit plugin
+  accepts both `keepLongStdio` and `stdioRetention`; the aggregation demo publishes 12 tests (7 passed, 5 failed, 2
+  skipped) as intended. That run only proves the probe itself.
+- **jenkins.vbc.ac.at: not yet.** What it is for (real agent, real plugin list if anonymous read is allowed, the
+  `@libs` checkout of vbc-cicd, a real `buildDockerImage` step list through `INSPECT_BUILD_URL`) only the real one shows.
