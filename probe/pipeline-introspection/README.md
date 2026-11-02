@@ -23,14 +23,20 @@ The demo fixtures contain deliberately failing tests, so a probe build ends UNST
 
 ## How to run it
 
-Jenkins builds a branch when a multibranch job that scans the repo discovers it with a `Jenkinsfile` at the root. That is
-true for any branch, not only `pushBranches` (those only decide what gets pushed to the registry). So:
+A multibranch job that scans the repo creates a branch job for any branch with a `Jenkinsfile` at the root, not only for
+`pushBranches` (those only decide what gets pushed to the registry). Whether it also *builds* a newly discovered branch
+depends on the job's configuration; on jenkins.vbc.ac.at it does not. So:
 
-1. In a repo Jenkins already scans (e.g. ProteomicsHelper.Python), create a branch `probe/pipeline-introspection` and put
-   this file there as the root `Jenkinsfile`. Nothing else on the branch matters.
-2. Push the branch. The first build registers the parameters; run "Build with Parameters" for a second build with the values
-   you want (`INSPECT_BUILD_URL`, `JENKINSTOOLS_REF`).
+1. In a repo Jenkins already scans, create a branch (e.g. `feat/probe-pipeline-introspection`) and put this file there as
+   the root `Jenkinsfile`. Nothing else on the branch matters.
+2. Push the branch. If no build starts, run "Scan Repository Now" on the multibranch job (its scan log says whether the
+   branch met the criteria and whether a build was triggered), then "Build Now" on the branch job. The first build
+   registers the parameters; "Build with Parameters" runs again with other values (`INSPECT_BUILD_URL`, `JENKINSTOOLS_REF`).
 3. Read the console log and the Test Result page. Delete the branch afterwards; the multibranch job drops it on its next scan.
+
+The REST section is anonymous. Where anonymous read is denied (jenkins.vbc.ac.at), it only shows `whoAmI`, and
+`INSPECT_BUILD_URL` cannot fetch anything; the console log of a real build shows every `sh` command of the library steps
+anyway.
 
 Pushing this file to jenkinstools itself triggers nothing: jenkinstools has no root `Jenkinsfile` and no Jenkins job.
 
@@ -43,5 +49,6 @@ Prefer the local test server (vbc_deployment `JenkinsTestServerVbc`) for everyth
   server has no security; the build's libraries show `vbc-cicd` trusted and `jenkinstools` untrusted; the junit plugin
   accepts both `keepLongStdio` and `stdioRetention`; the aggregation demo publishes 12 tests (7 passed, 5 failed, 2
   skipped) as intended. That run only proves the probe itself.
-- **jenkins.vbc.ac.at: not yet.** What it is for (real agent, real plugin list if anonymous read is allowed, the
-  `@libs` checkout of vbc-cicd, a real `buildDockerImage` step list through `INSPECT_BUILD_URL`) only the real one shows.
+- **jenkins.vbc.ac.at, 2026-11-02** (ProteomicsHelper.Python, `feat/probe-pipeline-introspection` #1, jenkinstools
+  `main`): every section ran; the build ended UNSTABLE as intended. What it found is about that Jenkins, not about the
+  probe, so it is recorded with the VBC preset: vbc_deployment `docs/jenkins-vbc.md`.

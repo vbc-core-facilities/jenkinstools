@@ -48,9 +48,13 @@ network's resolver and fall back to 8.8.8.8. On Docker Desktop, `192.168.65.7` i
 
 Plugins: `freeze-plugins.sh` resolves unversioned entries of `controller/plugins.txt` and pins them.
 
+A preset can make the "agent" closer to its real ones with build args of the `jenkins` service: `DOCKER_CLI_IMAGE`
+(with a matching `image:` for `dind`) and `AGENT_APT_PACKAGES` (Debian packages, e.g. `python3 jq`).
+
 ## Limits
 
 - One controller, builds on the built-in node. The real agents' OS, tools and docker versions may differ; the
-  introspection probe (`../probe/pipeline-introspection`) reports what the real ones have.
+  introspection probe (`../probe/pipeline-introspection`) reports what the real ones have; a preset records and matches
+  that (VBC: vbc_deployment `docs/jenkins-vbc.md`).
 - The sandbox and script approval behave as on any Jenkins: a dynamically loaded library (`library identifier:`) is
   untrusted, a global library configured by the overlay is trusted.

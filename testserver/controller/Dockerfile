@@ -16,6 +16,13 @@ USER root
 COPY --from=docker-cli /usr/local/bin/docker /usr/local/bin/docker
 COPY --from=docker-cli /usr/local/libexec/docker/cli-plugins/docker-buildx /usr/local/libexec/docker/cli-plugins/docker-buildx
 
+# Extra Debian packages on the "agent" (the controller runs the builds), so a preset can offer what its real agents have
+# (e.g. "python3 jq"). Default: none.
+ARG AGENT_APT_PACKAGES=""
+RUN if [ -n "${AGENT_APT_PACKAGES}" ]; then \
+        apt-get update && apt-get install -y --no-install-recommends ${AGENT_APT_PACKAGES} && rm -rf /var/lib/apt/lists/*; \
+    fi
+
 # The repos are bind-mounted from the host and owned by another uid; git refuses those without this.
 RUN git config --system --add safe.directory '*'
 
