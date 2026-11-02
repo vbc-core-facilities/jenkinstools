@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """MCP server (stdio) for the Jenkins test server in ../ (testserver/).
 
-The same operations as testserver.sh, as MCP tools, for Claude Code and any other MCP client. Python standard library
-only, on purpose: nothing to install, runs wherever python3 runs. Run it with `python -I` (isolated mode).
+The same operations as testserver.sh, as MCP tools, for Claude Code and any other MCP client. Needs a Python 3 interpreter
+and no packages: standard library only, on purpose. Run it with `python -I` (isolated mode).
 
 Builds take minutes, longer than a client waits for one tool call. So a build is started (start_build) and then waited
 for in slices (wait_build, at most WAIT_SLICE_MAX seconds per call), which a client can repeat.

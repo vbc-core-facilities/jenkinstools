@@ -1,7 +1,8 @@
 # MCP server for the Jenkins test server
 
 `jenkins_testserver_mcp.py` offers the operations of `../testserver.sh` as MCP tools (stdio), so Claude Code and other MCP
-clients drive the test server without a shell. Python standard library only: nothing to install. Made 2026-11-02.
+clients drive the test server without a shell. Needs a Python 3 interpreter on PATH (written and tested with 3.13), no packages:
+only the standard library. Made 2026-11-02.
 
 | Tool | What |
 | --- | --- |
