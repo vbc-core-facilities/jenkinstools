@@ -7,7 +7,9 @@
 #   down                       stop it (volumes, i.e. Jenkins home, built images and the registry, are kept)
 #   status                     server reachable? jobs and their branches
 #   scan <job>                 re-scan a repo's branches and tags now (otherwise every 2 minutes)
-#   build <job> <branch|tag>   start a build, wait for it, print result, test summary and the key log lines
+#   build <job> <branch|tag> [NAME=value ...]
+#                              start a build (with parameters, if given or if the job has any), wait for it, print
+#                              result, test summary and the key log lines
 #   log <job> <branch> [n]     full console log of build n (default: last)
 #   tests <job> <branch> [n]   test summary of build n, with every failing test and its message
 #
@@ -90,10 +92,20 @@ scan)
 	echo "scan of $1 started"
 	;;
 build)
-	[ $# -ge 2 ] || die "usage: build <job> <branch|tag>"
+	[ $# -ge 2 ] || die "usage: build <job> <branch|tag> [NAME=value ...]"
 	job=$1; branch=$2
-	curl -sf -o /dev/null "$(job_url "${job}" "${branch}")/api/json" || die "no branch '${branch}' in job '${job}' (commit it locally, then: scan ${job})"
-	queue=$(post "$(job_url "${job}" "${branch}")/build?delay=0")
+	shift 2
+	branch_json=$(curl -sf "$(job_url "${job}" "${branch}")/api/json?tree=property%5B_class%5D") ||
+		die "no branch '${branch}' in job '${job}' (commit it locally, then: scan ${job})"
+	# a job with parameters (declared by its Jenkinsfile after its first build) only starts through buildWithParameters;
+	# parameters not given keep their defaults
+	if [ $# -gt 0 ] || echo "${branch_json}" | grep -q ParametersDefinitionProperty; then
+		form=()
+		for parameter in "$@"; do form+=(--data-urlencode "${parameter}"); done
+		queue=$(post "$(job_url "${job}" "${branch}")/buildWithParameters?delay=0" "${form[@]}")
+	else
+		queue=$(post "$(job_url "${job}" "${branch}")/build?delay=0")
+	fi
 	[ -n "${queue}" ] || die "build was not queued"
 	number=''
 	for _ in $(seq 1 120); do
