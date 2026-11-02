@@ -29,6 +29,9 @@ Start the organisation preset (it extends this compose file), then drive it with
 ./testserver.sh log hive.proteomicstime my/branch 3   # full console log of build 3
 ```
 
+`build` takes `NAME=value` build parameters after the branch. The same operations exist as MCP tools for Claude Code and
+other MCP clients: [`mcp/`](mcp/README.md).
+
 The UI is at <http://127.0.0.1:18090> (not 8090: Windows reserves that range for Hyper-V on many machines).
 
 **Trying an unreleased jenkinstools change:** the test server serves the local jenkinstools repo for the GitHub URL, so a

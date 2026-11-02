@@ -1,0 +1,12 @@
+{
+  "mcpServers": {
+    "jenkins-testserver": {
+      "command": "python",
+      "args": ["-I", "testserver/mcp/jenkins_testserver_mcp.py"],
+      "env": {
+        "TESTSERVER_URL": "${TESTSERVER_URL:-http://127.0.0.1:18090}",
+        "TESTSERVER_COMPOSE_DIR": "${TESTSERVER_COMPOSE_DIR:-../vbc_deployment/JenkinsTestServerVbc}"
+      }
+    }
+  }
+}
