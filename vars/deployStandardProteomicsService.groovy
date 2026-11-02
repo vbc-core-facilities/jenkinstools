@@ -1,5 +1,5 @@
 /**
- * Version 2.3.0 - released as tag deployStandardProteomicsService/v2.3.0 (see CHANGELOG.md). Bump both with every change to this file.
+ * Version 2.4.0 - released as tag deployStandardProteomicsService-v2.4.0 (see CHANGELOG.md). Bump both with every change to this file.
  *
  * The VBC proteomics (protchem) service conventions on top of deployService: it fills in the
  * standard namespace, branches, build args, secrets, tests and notification, so a standard
@@ -29,6 +29,10 @@
  *                           Staging runs on pushes to stagingBranch, production on tags.
  *   testResultsFolder       '/app/tests/results' (tests: false for no test step at all)
  *   testScript              none; passed through when tests are on
+ *   testFailureOutcome      'unstable' when tests are on: failed tests mark the build UNSTABLE and the image is still pushed
+ *                           and deployed (what every service did before 2.4.0). 'ignore' leaves the build result alone,
+ *                           'abort' fails the build before the push and the Tower deploy (see deployService).
+ *                           No test result file at all counts as failed tests: a service without tests sets tests: false.
  *   ocpSmoke                true
  *   ocpSmokeExtraChecks     none; passed through when tests are on
  *   testResultAggregation   [format: 'ProteomicsEcosystemStandardV1', image: 'python:3.13.9-slim-bookworm'] when tests are on;
@@ -78,6 +82,7 @@ def call(Map config = [:]) {
         ocpSmokeExtraChecks: runTests ? config.ocpSmokeExtraChecks : null,
         testResultAggregation: resolveTestResultAggregation(config, runTests),
         keepLongTestOutput : runTests ? (config.keepLongTestOutput != false) : null,
+        testFailureOutcome : runTests ? (config.testFailureOutcome ?: 'unstable') : null,
         cockpitNotify      : cockpitNotification,
         imageRegistry      : config.imageRegistry ?: 'docker.artifactory.imp.ac.at',
         highFidelity       : config.highFidelity != null ? config.highFidelity : (env.TAG_NAME != null),
@@ -100,6 +105,7 @@ def call(Map config = [:]) {
         'ocpSmokeExtraChecks',
         'testResultAggregation',
         'keepLongTestOutput',
+        'testFailureOutcome',
         'cockpitNotify',
         'imageRegistry',
         'highFidelity',
@@ -112,8 +118,8 @@ def call(Map config = [:]) {
     deployService(deployServiceParameters)
 }
 
-// This tool's own version; bump it (and tag deployStandardProteomicsService/vX.Y.Z) with every change to this file.
-private String toolVersion() { return '2.3.0' }
+// This tool's own version; bump it (and tag deployStandardProteomicsService-vX.Y.Z) with every change to this file.
+private String toolVersion() { return '2.4.0' }
 
 // Ecosystem mandate (proteomics_ecosystem/docs/ecosystem-mandates.md): the format every app writes its test results in, so they
 // can be aggregated. Passed to the image as ECOSYSTEM_TEST_RESULT_FORMAT; the app maps it to explicit test framework settings.

@@ -1,5 +1,5 @@
 /**
- * Version 2.3.0 - released as tag deployService/v2.3.0 (see CHANGELOG.md). Bump both with every change to this file.
+ * Version 2.4.0 - released as tag deployService-v2.4.0 (see CHANGELOG.md). Bump both with every change to this file.
  *
  * Generic service pipeline wiring on top of IT's buildDockerImage (vbc-cicd), with NO defaults:
  * nothing is assumed, every value comes from the caller, and every optional feature is off unless
@@ -32,7 +32,16 @@
  * Tests (optional; the test step runs only when one of these is set):
  *   testResultsFolder    where the image keeps JUnit XML results; they are copied out and published
  *   testScript           script run inside the image first, with testResultsFolder as its argument
- *                        (needs testResultsFolder); a non-zero exit marks the build UNSTABLE
+ *                        (needs testResultsFolder); a non-zero exit counts as failed tests (see testFailureOutcome)
+ *   testFailureOutcome   what failed tests do to the build (needs testResultsFolder):
+ *                          'ignore'   shown in the test report only, the build result is not changed
+ *                          'unstable' the build is marked UNSTABLE; the image is still pushed and deployed
+ *                          'abort'    the build FAILS in the test stage, before the push and the Tower deploy
+ *                        Failed tests are: a failed testcase in the published results, a non-zero testScript exit, an
+ *                        error while running or collecting the tests, and NO result file at all (tests were asked for
+ *                        but none ran; a service without tests sets no testResultsFolder). Omitted: as before 2.4.0,
+ *                        Jenkins' own junit behaviour (failed testcases and a non-zero testScript mark the build
+ *                        UNSTABLE, no results pass silently).
  *   ocpSmoke             true to run the OCP arbitrary-UID probe-mechanics smoke
  *   ocpSmokeExtraChecks  List of extra shell lines for the smoke (no single quotes)
  *   testResultAggregation [format: '<named result format>', image: '<image with python3>'] (needs testResultsFolder).
@@ -155,8 +164,8 @@ def call(Map config = [:]) {
     }
 }
 
-// This tool's own version; bump it (and tag deployService/vX.Y.Z) with every change to this file.
-private String toolVersion() { return '2.3.0' }
+// This tool's own version; bump it (and tag deployService-vX.Y.Z) with every change to this file.
+private String toolVersion() { return '2.4.0' }
 
 // ---- validation --------------------------------------------------------------------------------------
 
@@ -201,6 +210,9 @@ private List<String> testProblems(Map config) {
         config.testScript && !config.testResultsFolder ? 'testScript needs testResultsFolder' : null,
         config.ocpSmokeExtraChecks && config.ocpSmoke != true ? 'ocpSmokeExtraChecks needs ocpSmoke: true' : null,
         config.testResultAggregation && !config.testResultsFolder ? 'testResultAggregation needs testResultsFolder' : null,
+        config.testFailureOutcome != null && !(config.testFailureOutcome in testFailureOutcomes())
+            ? "testFailureOutcome must be one of ${testFailureOutcomes()}".toString() : null,
+        config.testFailureOutcome != null && !config.testResultsFolder ? 'testFailureOutcome needs testResultsFolder' : null,
         config.testResultAggregation && !(config.testResultAggregation instanceof Map && config.testResultAggregation.format && config.testResultAggregation.image)
             ? 'testResultAggregation needs [format: ..., image: ...]' : null,
     ]
@@ -518,13 +530,17 @@ private boolean needsTestStep(Map config) {
     return config.testResultsFolder || config.testScript || config.ocpSmoke == true
 }
 
+private List<String> testFailureOutcomes() { return ['ignore', 'unstable', 'abort'] }
+
 // buildDockerImage calls this with (defaultImageName, allBuilds) after building the image.
 private Closure inImageTestStep(Map config) {
     String testResultsFolder = config.testResultsFolder as String
     String workspaceResultsFolder = 'test_results'
+    String testFailureOutcome = config.testFailureOutcome as String // null: Jenkins' own junit behaviour (before 2.4.0)
 
     return { defaultImageName, allBuilds ->
         def builtImage = allBuilds[defaultImageName]
+        List<String> testFailures = []
 
         if (testResultsFolder) {
             // cleared first: a results file left by an earlier build on this agent would otherwise be published again
@@ -540,7 +556,7 @@ private Closure inImageTestStep(Map config) {
                             label: 'in-image tests'
                         )
                         if (testScriptExitCode > 0) {
-                            unstable('Test script returned a non-zero exit code.')
+                            testFailures << "the test script returned exit code ${testScriptExitCode}".toString()
                         }
                     }
                     sh """
@@ -553,7 +569,7 @@ private Closure inImageTestStep(Map config) {
                 }
             } catch (testFailure) {
                 echo "Error occurred while running/collecting in-image tests: ${testFailure}"
-                unstable('Exception raised while running/collecting in-image tests.')
+                testFailures << "running or collecting the tests raised ${testFailure}".toString()
             }
         }
 
@@ -563,6 +579,14 @@ private Closure inImageTestStep(Map config) {
         }
 
         if (testResultsFolder) {
+            int resultFileCount = Integer.parseInt(sh(
+                script: "find ${workspaceResultsFolder} -maxdepth 1 -name '*.xml' -type f | wc -l",
+                returnStdout: true,
+                label: 'count test result files'
+            ).trim())
+            if (resultFileCount == 0) {
+                testFailures << "no test result file in ${testResultsFolder}, so no test ran (a service without tests sets no testResultsFolder, e.g. tests: false)".toString()
+            }
             String publishedResultsFolder = config.testResultAggregation
                 ? aggregateTestResults(config.testResultAggregation as Map, workspaceResultsFolder)
                 : workspaceResultsFolder
@@ -574,8 +598,42 @@ private Closure inImageTestStep(Map config) {
             if (config.keepLongTestOutput == true) {
                 junitParameters.keepLongStdio = true
             }
-            junit(junitParameters)
+            if (testFailureOutcome != null) {
+                junitParameters.skipMarkingBuildUnstable = true // applyTestFailureOutcome decides
+            }
+            def testResultSummary = junit(junitParameters)
+            int failedTestCount = testResultSummary?.failCount ?: 0
+            if (failedTestCount > 0) {
+                testFailures << "${failedTestCount} of ${testResultSummary.totalCount} tests failed".toString()
+            }
+            applyTestFailureOutcome(testFailureOutcome, testFailures)
         }
+    }
+}
+
+// Without testFailureOutcome (before 2.4.0): junit itself marks failed testcases UNSTABLE, a failed or broken test run marks
+// the build UNSTABLE too, and no results pass silently. Kept exactly so for callers that do not choose.
+private void applyTestFailureOutcome(String testFailureOutcome, List<String> testFailures) {
+    if (testFailureOutcome == null) {
+        List<String> runFailures = testFailures.findAll { String failure ->
+            failure.startsWith('the test script') || failure.startsWith('running or collecting')
+        }
+        if (!runFailures.isEmpty()) {
+            unstable("In-image tests: ${runFailures.join('; ')}.")
+        }
+        return
+    }
+    if (testFailures.isEmpty()) {
+        echo "In-image tests passed (testFailureOutcome '${testFailureOutcome}')."
+        return
+    }
+    String message = "In-image tests failed: ${testFailures.join('; ')}. testFailureOutcome is '${testFailureOutcome}'"
+    if (testFailureOutcome == 'ignore') {
+        echo "${message}, so the build result is not changed."
+    } else if (testFailureOutcome == 'unstable') {
+        unstable("${message}: the build is UNSTABLE, the image is still pushed and deployed.")
+    } else {
+        error("${message}: the build stops here, nothing is pushed or deployed.")
     }
 }
 

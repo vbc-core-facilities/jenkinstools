@@ -5,6 +5,12 @@ see [Versioning](README.md#versioning). Newest first within each tool.
 
 ## deployStandardProteomicsService
 
+### deployStandardProteomicsService-v2.4.0 - unreleased
+New `testFailureOutcome` (default `'unstable'` when tests run): what failed tests do to the build. `'ignore'` leaves the result
+alone, `'abort'` fails the build before the push and the Tower deploy. New with the default: no test result file at all now
+marks the build UNSTABLE (it passed silently before); a service without tests sets `tests: false`.
+Uses deployService-v2.4.0.
+
 ### deployStandardProteomicsService-v2.3.0 - 2026-11-02
 Implements the first ecosystem mandate, `TestResultNameFormat: ProteomicsEcosystemStandardV1`
 (proteomics_ecosystem/docs/ecosystem-mandates.md):
@@ -50,6 +56,11 @@ First release: the protchem conventions on top of deployService. It sets:
 All of them can be overridden, and `null` removes a default build arg.
 
 ## deployService
+
+### deployService-v2.4.0 - unreleased
+New optional `testFailureOutcome` (`'ignore'`, `'unstable'`, `'abort'`, needs `testResultsFolder`): failed testcases, a non-zero
+`testScript`, an error while running the tests and no result file at all count as failed tests, and the outcome decides.
+`'abort'` fails the test stage, so `buildDockerImage` neither pushes nor deploys. Omitted: unchanged behaviour.
 
 ### deployService-v2.3.0 - 2026-11-02
 - New optional `testResultAggregation: [format, image]`: the cases of each parameterized test are combined into one testcase

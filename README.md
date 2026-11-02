@@ -170,6 +170,7 @@ deployStandardProteomicsService(
 | `pushBranches` | `['master', 'develop']` | any list |
 | `tower` | staging job on pushes to `master`; production job on tags with `app_generic_image_tag: <tag>` | A Map with `stagingBranch` and/or `imageTagVariable`. `false` for no Tower (build and push only) |
 | `testResultsFolder` | `/app/tests/results` | any path. `tests: false` means no test step at all |
+| `testFailureOutcome` | `'unstable'`: failed tests mark the build UNSTABLE, the image is still pushed and deployed | `'ignore'` (the build result is not changed) or `'abort'` (the build fails before the push and the Tower deploy). No test result file at all counts as failed tests, so a service without tests sets `tests: false` |
 | `ocpSmoke` | on | `false` |
 | `buildArgs` | `NUGET_REPO_USER=vbc-proteomics`, `MINVER_VERSION_OVERRIDE=<tag without v>`, `APP_USER=app`, `APP_GROUP_GID=0`, `TEST_RESULTS_FOLDER=<testResultsFolder>`, `SEQ_VERSION=2026.1.17044` | Merged over the defaults; any new names work, and `null` removes one (e.g. `[SEQ_VERSION: null]` for no Seq). `defaultBuildArgs: false` starts empty (`dockerHttpPort` still applies) |
 | `secrets` | `SECRETS-NUGET-REPO-PW` from `vbc-proteomics-github-pat` | Merged by `id`; any new secrets work. `defaultSecrets: false` starts empty |
@@ -218,6 +219,7 @@ It runs these steps:
 | `secrets` | no | BuildKit secrets `[[id: '…', credentialsId: '…', kind: 'usernamePassword' \| 'string'], …]`, never passed as build args or shown in logs |
 | `tower` | no | `[staging, stagingBranch, production, imageTagVariable]`. Each job needs its companion value. `towerJobs` passes a raw `buildDockerImage` map instead |
 | `testResultsFolder`, `testScript`, `ocpSmoke`, `ocpSmokeExtraChecks` | no | The test step runs only when one of these is set. `testScript` needs `testResultsFolder`, and the extra checks need `ocpSmoke: true` |
+| `testFailureOutcome` | no | `'ignore'`, `'unstable'` or `'abort'`: what failed tests do to the build (needs `testResultsFolder`). Failed tests are failed testcases, a non-zero `testScript`, an error running the tests, and no result file at all. Omitted: Jenkins' own junit behaviour, as before 2.4.0 |
 | `imageRegistry` | yes | The registry host the image is pushed to, e.g. `docker.artifactory.imp.ac.at` |
 | `highFidelity` | no | Default false. `true` makes the image coherence check fail (instead of UNSTABLE) when the pushed image holds another commit than the one built |
 | `cockpitNotify` | no | `[credentialsId: …]` or `[connectionString: …]`. A pipeline secret, never passed to the image |
