@@ -5,6 +5,15 @@ see [Versioning](README.md#versioning). Newest first within each tool.
 
 ## deployStandardProteomicsService
 
+### deployStandardProteomicsService/v2.3.0 - 2026-11-02
+Implements the first ecosystem mandate, `TestResultNameFormat: ProteomicsEcosystemStandardV1`
+(proteomics_ecosystem/docs/ecosystem-mandates.md):
+- New standard build arg `ECOSYSTEM_TEST_RESULT_FORMAT` = `ProteomicsEcosystemStandardV1` when tests run (`null` removes it).
+- `testResultAggregation` is on when tests run (format `ProteomicsEcosystemStandardV1`, image `python:3.13.9-slim-bookworm`);
+  a Map overrides either, `false` turns it off.
+- `keepLongTestOutput` is on when tests run; `false` turns it off.
+Uses deployService/v2.3.0.
+
 ### deployStandardProteomicsService/v2.2.3 - 2026-10-29
 No change of its own; released so that tag-pinned Jenkinsfiles pick up deployService/v2.2.1 (in-image test step fix).
 
@@ -41,6 +50,14 @@ First release: the protchem conventions on top of deployService. It sets:
 All of them can be overridden, and `null` removes a default build arg.
 
 ## deployService
+
+### deployService/v2.3.0 - 2026-11-02
+- New optional `testResultAggregation: [format, image]`: the cases of each parameterized test are combined into one testcase
+  before publishing, with a summary and every case's details in its output. The raw files are archived as build artifacts.
+  A non-conforming results file is published unaggregated and marks the build UNSTABLE. See README, Test result aggregation.
+- New optional `keepLongTestOutput: true`: the full output of passing tests is kept (junit `keepLongStdio`).
+- Fix: the workspace test results folder is cleared before each run, so a file left by an earlier build on the same agent is
+  no longer published again.
 
 ### deployService/v2.2.1 - 2026-10-29
 Fix: the in-image test step (`image.inside()`) failed on every image built to the OCP deployment standard with `Failed to run top ... container is not running`,

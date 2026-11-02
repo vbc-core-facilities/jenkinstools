@@ -1,5 +1,5 @@
 /**
- * Version 2.2.1 - released as tag deployService/v2.2.1 (see CHANGELOG.md). Bump both with every change to this file.
+ * Version 2.3.0 - released as tag deployService/v2.3.0 (see CHANGELOG.md). Bump both with every change to this file.
  *
  * Generic service pipeline wiring on top of IT's buildDockerImage (vbc-cicd), with NO defaults:
  * nothing is assumed, every value comes from the caller, and every optional feature is off unless
@@ -35,6 +35,15 @@
  *                        (needs testResultsFolder); a non-zero exit marks the build UNSTABLE
  *   ocpSmoke             true to run the OCP arbitrary-UID probe-mechanics smoke
  *   ocpSmokeExtraChecks  List of extra shell lines for the smoke (no single quotes)
+ *   testResultAggregation [format: '<named result format>', image: '<image with python3>'] (needs testResultsFolder).
+ *                        Jenkins' JUnit view knows only testsuite > testcase, so a parameterized test shows up as one test
+ *                        per case. With this, the cases of one test are combined into one testcase before publishing:
+ *                        it fails if any case failed, its time is their sum, and its output starts with a summary of
+ *                        every case followed by each case's raw details (resources/jenkinstools/aggregate_junit.py).
+ *                        The raw files are archived as build artifacts. A results file that does not conform to the
+ *                        format is published unaggregated and marks the build UNSTABLE; nothing is dropped.
+ *                        Known formats: ProteomicsEcosystemStandardV1.
+ *   keepLongTestOutput   true to keep the full standard output of passing tests too (junit keepLongStdio)
  *
 
 
@@ -147,7 +156,7 @@ def call(Map config = [:]) {
 }
 
 // This tool's own version; bump it (and tag deployService/vX.Y.Z) with every change to this file.
-private String toolVersion() { return '2.2.1' }
+private String toolVersion() { return '2.3.0' }
 
 // ---- validation --------------------------------------------------------------------------------------
 
@@ -191,6 +200,9 @@ private List<String> testProblems(Map config) {
     List<String> candidateProblems = [
         config.testScript && !config.testResultsFolder ? 'testScript needs testResultsFolder' : null,
         config.ocpSmokeExtraChecks && config.ocpSmoke != true ? 'ocpSmokeExtraChecks needs ocpSmoke: true' : null,
+        config.testResultAggregation && !config.testResultsFolder ? 'testResultAggregation needs testResultsFolder' : null,
+        config.testResultAggregation && !(config.testResultAggregation instanceof Map && config.testResultAggregation.format && config.testResultAggregation.image)
+            ? 'testResultAggregation needs [format: ..., image: ...]' : null,
     ]
     return withoutNulls(candidateProblems)
 }
@@ -515,7 +527,8 @@ private Closure inImageTestStep(Map config) {
         def builtImage = allBuilds[defaultImageName]
 
         if (testResultsFolder) {
-            sh "mkdir -p ${workspaceResultsFolder}; chmod 777 ${workspaceResultsFolder}"
+            // cleared first: a results file left by an earlier build on this agent would otherwise be published again
+            sh "rm -rf ${workspaceResultsFolder}; mkdir -p ${workspaceResultsFolder}; chmod 777 ${workspaceResultsFolder}"
             try {
                 // inside() runs the container as the agent's uid:gid. Images built to the OCP standard grant
                 // access only to group 0 (arbitrary UID), so add it, or the entrypoint cannot even be read.
@@ -550,8 +563,54 @@ private Closure inImageTestStep(Map config) {
         }
 
         if (testResultsFolder) {
-            junit skipPublishingChecks: true, allowEmptyResults: true, testResults: "${workspaceResultsFolder}/*.xml"
+            String publishedResultsFolder = config.testResultAggregation
+                ? aggregateTestResults(config.testResultAggregation as Map, workspaceResultsFolder)
+                : workspaceResultsFolder
+            Map junitParameters = [
+                skipPublishingChecks: true,
+                allowEmptyResults   : true,
+                testResults         : "${publishedResultsFolder}/*.xml".toString(),
+            ]
+            if (config.keepLongTestOutput == true) {
+                junitParameters.keepLongStdio = true
+            }
+            junit(junitParameters)
         }
+    }
+}
+
+// Combines the cases of each parameterized test into one testcase (see testResultAggregation). Returns the folder to publish:
+// the aggregated one, or the raw one when aggregation could not run at all. Never fails the build: a problem marks it UNSTABLE.
+private String aggregateTestResults(Map aggregation, String rawResultsFolder) {
+    String aggregatedResultsFolder = "${rawResultsFolder}_aggregated"
+    String scriptPath = '.jenkinstools/aggregate_junit.py'
+    String format = aggregation.format as String
+    try {
+        archiveArtifacts(artifacts: "${rawResultsFolder}/**", allowEmptyArchive: true)
+        writeFile(file: scriptPath, text: libraryResource('jenkinstools/aggregate_junit.py'))
+        sh(script: "rm -rf ${aggregatedResultsFolder}", label: 'clear earlier aggregated test results')
+        int exitCode = 1
+        docker.image(aggregation.image as String).inside {
+            exitCode = sh(
+                script: "python3 -I ${scriptPath} --format '${format}' --input ${rawResultsFolder} --output ${aggregatedResultsFolder}",
+                returnStatus: true,
+                label: 'aggregate the cases of parameterized tests'
+            )
+        }
+        if (exitCode == 2) {
+            unstable("Test results: at least one file does not conform to ${format} and was published unaggregated (see the aggregation report above).")
+            return aggregatedResultsFolder
+        }
+        if (exitCode != 0) {
+            unstable("Test results could not be aggregated (exit code ${exitCode}); the raw results are published instead.")
+            return rawResultsFolder
+        }
+        return aggregatedResultsFolder
+    } catch (InterruptedException aborted) {
+        throw aborted
+    } catch (Exception failure) {
+        unstable("Test results could not be aggregated (${failure.message}); the raw results are published instead.")
+        return rawResultsFolder
     }
 }
 

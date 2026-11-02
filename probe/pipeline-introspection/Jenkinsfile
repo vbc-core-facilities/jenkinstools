@@ -1,0 +1,151 @@
+// Pipeline introspection probe: what a Jenkinsfile on the VBC Jenkins can see of its own surroundings, without admin rights.
+// See README.md next to this file for how to run it and what each section is for.
+//
+// It never calls deployService or buildDockerImage: nothing is built for release, pushed or deployed.
+// It uses no credentials. Jenkins REST calls are anonymous; whatever needs a login simply answers 401/403.
+
+properties([
+    parameters([
+        string(name: 'JENKINSTOOLS_REF', defaultValue: 'main',
+            description: 'jenkinstools git ref to load for the aggregation demo (a branch or a tag)'),
+        string(name: 'AGGREGATION_IMAGE', defaultValue: 'python:3.13.9-slim-bookworm',
+            description: 'image the aggregation runs in, as deployStandardProteomicsService uses it'),
+        string(name: 'INSPECT_BUILD_URL', defaultValue: '',
+            description: 'optional: URL of an existing build (e.g. a deployStandardProteomicsService run) whose step list to fetch anonymously'),
+        booleanParam(name: 'GROOVY_INTROSPECTION', defaultValue: false,
+            description: 'also try Groovy introspection that the sandbox may reject. Every rejection lands in the admins\' script approval queue: tell IT first.'),
+    ])
+])
+
+library identifier: "jenkinstools@${params.JENKINSTOOLS_REF ?: 'main'}",
+        retriever: modernSCM([$class: 'GitSCMSource', remote: 'https://github.com/vbc-core-facilities/jenkinstools.git'])
+
+def section(String title, Closure body) {
+    stage(title) {
+        try {
+            body()
+        } catch (InterruptedException aborted) {
+            throw aborted
+        } catch (Throwable failure) {
+            echo "PROBE [${title}] failed: ${failure.class.name}: ${failure.message}"
+        }
+    }
+}
+
+node {
+    section('Agent and tools') {
+        sh(label: 'agent', script: '''
+            set +e
+            echo "== host"; hostname; uname -a; id; cat /etc/os-release 2>/dev/null | head -3
+            echo "== tools"; for t in sh bash git curl openssl python3 java docker jq awk sed; do printf '%-8s ' "$t"; command -v "$t" || echo '(missing)'; done
+            echo "== versions"; git --version; curl --version | head -1; openssl version; python3 -V 2>&1
+            echo "== docker"; docker version --format '{{.Server.Version}} (api {{.Server.APIVersion}})'; docker buildx version
+            docker info --format 'driver={{.Driver}} root={{.DockerRootDir}} cpus={{.NCPU}} mem={{.MemTotal}} registries={{.RegistryConfig.IndexConfigs}}'
+            echo "== disk"; df -h . 2>/dev/null | tail -1
+        ''')
+    }
+
+    section('Environment') {
+        // values of anything that looks like a secret are masked; Jenkins does not bind credentials here anyway
+        sh(label: 'environment', script: '''
+            env | sort | sed -E 's/^([^=]*(TOKEN|PASS|SECRET|KEY|PW|CRED)[^=]*)=.*/\\1=<masked>/I'
+        ''')
+    }
+
+    section('Workspace layout') {
+        // @tmp holds the durable-task scripts of sh steps; @libs (if present on this node) holds library checkouts
+        sh(label: 'workspace', script: '''
+            set +e
+            echo "WORKSPACE=$WORKSPACE"
+            for d in "$WORKSPACE" "$WORKSPACE@tmp" "$WORKSPACE@libs" "$WORKSPACE@script"; do
+              echo "== $d"; ls -la "$d" 2>&1 | head -40
+            done
+            echo "== library checkouts visible on this node"
+            find "$(dirname "$WORKSPACE")" -maxdepth 3 -path '*@libs*' -name vars 2>/dev/null | head -20
+        ''')
+    }
+
+    section('Jenkins REST (anonymous)') {
+        String inspect = params.INSPECT_BUILD_URL ?: ''
+        sh(label: 'rest', script: """
+            set +e
+            probe() {
+              code=\$(curl -sS -o /tmp/probe.body -w '%{http_code}' --max-time 20 "\$1")
+              echo "== \$code \$1"
+              head -c 3000 /tmp/probe.body; echo
+            }
+            probe "\${JENKINS_URL}whoAmI/api/json"
+            probe "\${JENKINS_URL}api/json?tree=mode,nodeName,useSecurity,numExecutors"
+            probe "\${JENKINS_URL}pluginManager/api/json?depth=1&tree=plugins[shortName,version]"
+            probe "\${BUILD_URL}api/json?tree=actions[_class,libraries[name,version,trusted]]"
+            probe "\${BUILD_URL}wfapi/describe"
+            probe "\${JOB_URL}api/json?tree=_class,name,fullName"
+            if [ -n '${inspect}' ]; then
+              probe '${inspect}api/json?tree=actions[_class,libraries[name,version,trusted]]'
+              probe '${inspect}wfapi/describe'
+              probe '${inspect}flowGraphTable/'
+            fi
+        """)
+    }
+
+    section('JUnit step parameters') {
+        writeFile(file: 'probe-junit/sample.xml', text: '''<?xml version="1.0" encoding="utf-8"?>
+<testsuites><testsuite name="probe" tests="1"><testcase classname="probe.Junit" name="ParameterSupport" time="0.001"><system-out>probe output</system-out></testcase></testsuite></testsuites>
+''')
+        try {
+            junit(testResults: 'probe-junit/*.xml', keepLongStdio: true, skipPublishingChecks: true)
+            echo 'PROBE junit: keepLongStdio is accepted'
+        } catch (Throwable failure) {
+            echo "PROBE junit: keepLongStdio REJECTED: ${failure.message}"
+        }
+        try {
+            junit(testResults: 'probe-junit/*.xml', stdioRetention: 'ALL', skipPublishingChecks: true)
+            echo 'PROBE junit: stdioRetention is accepted (junit plugin 1207 or newer)'
+        } catch (Throwable failure) {
+            echo "PROBE junit: stdioRetention rejected (older junit plugin): ${failure.message}"
+        }
+    }
+
+    section('Aggregation demo') {
+        // The real aggregation path of deployService: the script from the library, run in the pinned image on this agent,
+        // over real xUnit and pytest output. The published result shows how aggregated tests look in this Jenkins.
+        String ref = params.JENKINSTOOLS_REF ?: 'main'
+        writeFile(file: '.jenkinstools/aggregate_junit.py', text: libraryResource('jenkinstools/aggregate_junit.py'))
+        sh(label: 'fetch fixtures', script: """
+            rm -rf demo-raw demo-aggregated; mkdir -p demo-raw
+            for f in xunit.xml pytest.xml; do
+              curl -sSf --max-time 20 -o demo-raw/\$f "https://raw.githubusercontent.com/vbc-core-facilities/jenkinstools/${ref}/test/aggregate_junit/fixtures/\$f"
+            done
+            ls -la demo-raw
+        """)
+        docker.image(params.AGGREGATION_IMAGE).inside {
+            int exitCode = sh(returnStatus: true, label: 'aggregate',
+                script: 'python3 -I .jenkinstools/aggregate_junit.py --input demo-raw --output demo-aggregated')
+            echo "PROBE aggregation exit code: ${exitCode}"
+        }
+        archiveArtifacts(artifacts: 'demo-raw/**', allowEmptyArchive: true)
+        // both are published: the raw fixtures under their own suite names would mix with the aggregated ones, so only
+        // the aggregated set goes to the JUnit view; the raw set is in the build artifacts for comparison
+        junit(testResults: 'demo-aggregated/*.xml', keepLongStdio: true, skipPublishingChecks: true, allowEmptyResults: true)
+        echo 'PROBE aggregation: the fixtures contain deliberately failing tests, so this build ends UNSTABLE. That is expected.'
+    }
+
+    if (params.GROOVY_INTROSPECTION) {
+        section('Groovy introspection (sandbox)') {
+            Map<String, Closure> attempts = [
+                'script class'           : { this.getClass().getName() },
+                'binding variable names' : { binding.variables.keySet().toString() },
+                'currentBuild.rawBuild'  : { currentBuild.rawBuild.toString() },
+                'library action'         : { currentBuild.rawBuild.getAction(Class.forName('org.jenkinsci.plugins.workflow.libs.LibrariesAction')).toString() },
+                'buildDockerImage global': { binding.hasVariable('buildDockerImage').toString() },
+            ]
+            attempts.each { String what, Closure attempt ->
+                try {
+                    echo "PROBE groovy [${what}]: ${attempt()}"
+                } catch (Throwable failure) {
+                    echo "PROBE groovy [${what}] rejected: ${failure.class.simpleName}: ${failure.message}"
+                }
+            }
+        }
+    }
+}

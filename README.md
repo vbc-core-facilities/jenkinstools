@@ -8,7 +8,7 @@ Small, reusable [Jenkins shared library](https://www.jenkins.io/doc/book/pipelin
 | `serviceBusNotify` | Sends any message to an Azure Service Bus queue or topic, given a connection string or a SAS token. |
 | `buildEventMessage` | Builds a generic `jenkins-build-event/v1` message describing the current build. |
 | `vbcDeploymentCockpitNotify` | Sends a build event to the VBC Deployment Cockpit (fixed topic), so the cockpit shows the build as running. |
-| `deployService` | Generic service pipeline wiring with **no defaults**: build args and BuildKit secrets, build-info reporting, in-image tests and OCP smoke, push, Tower, cockpit notification, and pre/post actions. |
+| `deployService` | Generic service pipeline wiring with **no defaults**: build args and BuildKit secrets, build-info reporting, in-image tests (optionally with parameterized cases aggregated) and OCP smoke, push, Tower, cockpit notification, and pre/post actions. |
 | `deployStandardProteomicsService` | The protchem conventions (namespace, branches, standard build args, secrets, tests, notification) on top of `deployService`, all overridable. A standard service needs only its image, Dockerfile and its two Tower job names. |
 
 **Failures don't break the build by default.** Any notification problem only prints a warning and the build carries on. `failOnError: true` fails the build instead. Aborting a build is never swallowed.
@@ -57,6 +57,36 @@ them. A failure says that the wrong state was found after the pipeline had finis
 wrong, and that it has to be redone (let the other build finish, re-run this build, redeploy). A check that cannot run (the
 pull or inspect fails) only marks the build UNSTABLE. Prevention needs `buildDockerImage` to name its local image per build,
 or the builds of one commit to be serialized.
+
+## Test result aggregation
+
+Jenkins' JUnit view knows only `testsuite > testcase`, so a parameterized test (an xUnit `[Theory]`, a pytest `parametrize`)
+shows up as one test per case: ten `RetriesBackOff(...)` entries for what is one expectation. With `testResultAggregation`,
+`deployService` combines the cases of each test into one testcase before publishing
+(`resources/jenkinstools/aggregate_junit.py`, run in a pinned Python image on the agent):
+
+- **Result:** failed if any case failed or errored; skipped only if every case was skipped; passed otherwise.
+- **Time:** the sum of its cases.
+- **Failure message:** `<failed>/<total> cases failed: <case>, <case>, ...`; the failure body holds each failing case's own
+  message and stack trace.
+- **Standard output:** first a summary (counts, total time, every case with its result and time), then every case's raw
+  details, including its own output. Standard error: every case's own, under a header.
+- **Properties:** `aggregation.cases`, `aggregation.passed`, `aggregation.failed`, `aggregation.skipped`, `aggregation.format`.
+
+Tests are grouped by suite, `classname` and test name. The test name is everything before the first `(` or `[` of the
+testcase name, which is what the input format guarantees
+([ProteomicsEcosystemStandardV1](https://github.com/vbc-core-facilities/proteomics_ecosystem/blob/master/docs/ecosystem-mandates.md)).
+A test without cases passes through unchanged. The raw files are archived as build artifacts, so per-case results stay
+downloadable. A file that does not conform (no `time`, a name starting with `(` or `[`, broken XML) is published unaggregated
+and marks the build **UNSTABLE**; nothing is dropped. If the aggregation cannot run at all, the raw results are published and
+the build is UNSTABLE.
+
+`deployStandardProteomicsService` turns it on whenever tests run, and passes the format to the image as the build arg
+`ECOSYSTEM_TEST_RESULT_FORMAT`, so the app can set its test frameworks explicitly. It also keeps the full output of passing
+tests (`keepLongTestOutput`).
+
+Tests of the script: `python -I -m unittest discover -s test/aggregate_junit -v`. The fixtures are real xUnit and pytest
+output.
 
 ## Versioning
 

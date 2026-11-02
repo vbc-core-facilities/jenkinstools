@@ -1,0 +1,111 @@
+<?xml version="1.0" encoding="utf-8"?><testsuites name="pytest tests"><testsuite name="pytest" errors="0" failures="3" skipped="1" tests="12" time="1.307" timestamp="2026-11-02T00:00:00" hostname="fixture-host"><testcase classname="pkg.test_fixture" name="test_backoff[0-60]" time="0.001"><system-out>--------------------------------- Captured Log ---------------------------------
+
+--------------------------------- Captured Out ---------------------------------
+stdout for 0
+
+</system-out><system-err>--------------------------------- Captured Err ---------------------------------
+stderr for 0
+
+</system-err></testcase><testcase classname="pkg.test_fixture" name="test_backoff[1-5]" time="0.001"><system-out>--------------------------------- Captured Log ---------------------------------
+
+--------------------------------- Captured Out ---------------------------------
+stdout for 1
+
+</system-out><system-err>--------------------------------- Captured Err ---------------------------------
+stderr for 1
+
+</system-err></testcase><testcase classname="pkg.test_fixture" name="test_backoff[3-20]" time="0.001"><failure message="AssertionError: case 3/20 deliberately fails&#10;assert 3 != 3">failures = 3, expected = 20
+
+    @pytest.mark.parametrize("failures,expected", [(0, 60), (1, 5), (3, 20), (4, 40)])
+    def test_backoff(failures, expected):
+        print(f"stdout for {failures}")
+        print(f"stderr for {failures}", file=sys.stderr)
+&gt;       assert failures != 3, f"case {failures}/{expected} deliberately fails"
+E       AssertionError: case 3/20 deliberately fails
+E       assert 3 != 3
+
+pkg\test_fixture.py:8: AssertionError</failure><system-out>--------------------------------- Captured Log ---------------------------------
+
+--------------------------------- Captured Out ---------------------------------
+stdout for 3
+
+</system-out><system-err>--------------------------------- Captured Err ---------------------------------
+stderr for 3
+
+</system-err></testcase><testcase classname="pkg.test_fixture" name="test_backoff[4-40]" time="0.001"><system-out>--------------------------------- Captured Log ---------------------------------
+
+--------------------------------- Captured Out ---------------------------------
+stdout for 4
+
+</system-out><system-err>--------------------------------- Captured Err ---------------------------------
+stderr for 4
+
+</system-err></testcase><testcase classname="pkg.test_fixture.TestGroup" name="test_names[a(b)[c].d]" time="0.000"><system-out>--------------------------------- Captured Log ---------------------------------
+
+--------------------------------- Captured Out ---------------------------------
+
+</system-out><system-err>--------------------------------- Captured Err ---------------------------------
+
+</system-err></testcase><testcase classname="pkg.test_fixture.TestGroup" name="test_names[]" time="0.000"><system-out>--------------------------------- Captured Log ---------------------------------
+
+--------------------------------- Captured Out ---------------------------------
+
+</system-out><system-err>--------------------------------- Captured Err ---------------------------------
+
+</system-err></testcase><testcase classname="pkg.test_fixture.TestGroup" name="test_names[  ]" time="0.001"><failure message="AssertionError: assert '  ' != '  '">self = &lt;pkg.test_fixture.TestGroup object at 0x0000000000000000&gt;, value = '  '
+
+    @pytest.mark.parametrize("value", ["a(b)[c].d", "", "  ", None])
+    def test_names(self, value):
+&gt;       assert value != "  "
+E       AssertionError: assert '  ' != '  '
+
+pkg\test_fixture.py:13: AssertionError</failure><system-out>--------------------------------- Captured Log ---------------------------------
+
+--------------------------------- Captured Out ---------------------------------
+
+</system-out><system-err>--------------------------------- Captured Err ---------------------------------
+
+</system-err></testcase><testcase classname="pkg.test_fixture.TestGroup" name="test_names[None]" time="0.000"><system-out>--------------------------------- Captured Log ---------------------------------
+
+--------------------------------- Captured Out ---------------------------------
+
+</system-out><system-err>--------------------------------- Captured Err ---------------------------------
+
+</system-err></testcase><testcase classname="pkg.test_fixture.TestGroup" name="test_plain" time="0.000"><system-out>--------------------------------- Captured Log ---------------------------------
+
+--------------------------------- Captured Out ---------------------------------
+plain pass output
+
+</system-out><system-err>--------------------------------- Captured Err ---------------------------------
+
+</system-err></testcase><testcase classname="pkg.test_fixture.TestGroup" name="test_skipped" time="0.000"><skipped type="pytest.skip" message="deliberately skipped">pkg/test_fixture.py:18: deliberately skipped</skipped><system-out>--------------------------------- Captured Log ---------------------------------
+
+--------------------------------- Captured Out ---------------------------------
+
+</system-out><system-err>--------------------------------- Captured Err ---------------------------------
+
+</system-err><system-out>--------------------------------- Captured Log ---------------------------------
+
+--------------------------------- Captured Out ---------------------------------
+
+</system-out><system-err>--------------------------------- Captured Err ---------------------------------
+
+</system-err></testcase><testcase classname="pkg.test_fixture.TestGroup" name="test_slow" time="1.201"><system-out>--------------------------------- Captured Log ---------------------------------
+
+--------------------------------- Captured Out ---------------------------------
+
+</system-out><system-err>--------------------------------- Captured Err ---------------------------------
+
+</system-err></testcase><testcase classname="pkg.test_fixture" name="test_error_in_fixture" time="0.001"><failure message="RuntimeError: boom">request = &lt;FixtureRequest for &lt;Function test_error_in_fixture&gt;&gt;
+
+    def test_error_in_fixture(request):
+&gt;       raise RuntimeError("boom")
+E       RuntimeError: boom
+
+pkg\test_fixture.py:26: RuntimeError</failure><system-out>--------------------------------- Captured Log ---------------------------------
+
+--------------------------------- Captured Out ---------------------------------
+
+</system-out><system-err>--------------------------------- Captured Err ---------------------------------
+
+</system-err></testcase></testsuite></testsuites>

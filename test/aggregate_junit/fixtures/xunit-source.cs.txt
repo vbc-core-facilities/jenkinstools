@@ -1,0 +1,36 @@
+using Xunit;
+using Xunit.Abstractions;
+
+namespace Fixture.Tests;
+
+public class BackOffTests(ITestOutputHelper output)
+{
+    [Theory]
+    [InlineData(0, 60)]
+    [InlineData(1, 5)]
+    [InlineData(3, 20)]
+    [InlineData(4, 40)]
+    public void RetriesBackOff(int consecutiveFailures, int expectedSeconds)
+    {
+        output.WriteLine($"helper output for {consecutiveFailures}");
+        Console.WriteLine($"console output for {consecutiveFailures}");
+        Assert.True(consecutiveFailures != 3, $"case {consecutiveFailures}/{expectedSeconds} deliberately fails");
+    }
+
+    [Theory]
+    [InlineData("a(b)[c].d")]
+    [InlineData("plain")]
+    public void NamesWithBrackets(string value) => Assert.NotNull(value);
+
+    [Fact]
+    public void PlainPasses() => output.WriteLine("plain pass output");
+
+    [Fact]
+    public void PlainFails() => Assert.Equal(1, 2);
+
+    [Fact(Skip = "deliberately skipped")]
+    public void Skipped() { }
+
+    [Fact]
+    public async Task SlowOne() => await Task.Delay(1200);
+}

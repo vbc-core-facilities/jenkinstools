@@ -1,0 +1,11 @@
+
+<testsuites>
+	<testsuite tests="2" name="R-tests">
+		<testcase classname="bash" name="RscriptExists">
+			
+		</testcase>
+		<testcase classname="bash" name="LimmaAvailable">
+			
+		</testcase>
+	</testsuite>
+</testsuites>

@@ -1,5 +1,5 @@
 /**
- * Version 2.2.3 - released as tag deployStandardProteomicsService/v2.2.3 (see CHANGELOG.md). Bump both with every change to this file.
+ * Version 2.3.0 - released as tag deployStandardProteomicsService/v2.3.0 (see CHANGELOG.md). Bump both with every change to this file.
  *
  * The VBC proteomics (protchem) service conventions on top of deployService: it fills in the
  * standard namespace, branches, build args, secrets, tests and notification, so a standard
@@ -31,6 +31,9 @@
  *   testScript              none; passed through when tests are on
  *   ocpSmoke                true
  *   ocpSmokeExtraChecks     none; passed through when tests are on
+ *   testResultAggregation   [format: 'ProteomicsEcosystemStandardV1', image: 'python:3.13.9-slim-bookworm'] when tests are on;
+ *                           a Map overrides either; false = publish the raw cases (see deployService)
+ *   keepLongTestOutput      true when tests are on: the full output of passing tests is kept too; false = Jenkins' default
  *   buildArgs               merged over the standard build args below; a null value removes one:
  *                             NUGET_REPO_USER          'vbc-proteomics'
  *                             MINVER_VERSION_OVERRIDE  git tag without a leading 'v' ('' if not a tag build)
@@ -38,6 +41,7 @@
  *                             APP_GROUP_GID            '0'
  *                             TEST_RESULTS_FOLDER      <testResultsFolder>
  *                             SEQ_VERSION              '2026.1.17044' (pinned; [SEQ_VERSION: null] for no Seq)
+ *                             ECOSYSTEM_TEST_RESULT_FORMAT  'ProteomicsEcosystemStandardV1' when tests are on (ecosystem mandate)
  *   defaultBuildArgs        false to start from no standard build args (dockerHttpPort still applies)
  *   secrets                 merged by id over the standard BuildKit secret:
  *                             [id: 'SECRETS-NUGET-REPO-PW', credentialsId: 'vbc-proteomics-github-pat',
@@ -72,6 +76,8 @@ def call(Map config = [:]) {
         testScript         : runTests ? config.testScript : null,
         ocpSmoke           : runTests && config.ocpSmoke != false,
         ocpSmokeExtraChecks: runTests ? config.ocpSmokeExtraChecks : null,
+        testResultAggregation: resolveTestResultAggregation(config, runTests),
+        keepLongTestOutput : runTests ? (config.keepLongTestOutput != false) : null,
         cockpitNotify      : cockpitNotification,
         imageRegistry      : config.imageRegistry ?: 'docker.artifactory.imp.ac.at',
         highFidelity       : config.highFidelity != null ? config.highFidelity : (env.TAG_NAME != null),
@@ -92,6 +98,8 @@ def call(Map config = [:]) {
         'testScript',
         'ocpSmoke',
         'ocpSmokeExtraChecks',
+        'testResultAggregation',
+        'keepLongTestOutput',
         'cockpitNotify',
         'imageRegistry',
         'highFidelity',
@@ -105,7 +113,14 @@ def call(Map config = [:]) {
 }
 
 // This tool's own version; bump it (and tag deployStandardProteomicsService/vX.Y.Z) with every change to this file.
-private String toolVersion() { return '2.2.3' }
+private String toolVersion() { return '2.3.0' }
+
+// Ecosystem mandate (proteomics_ecosystem/docs/ecosystem-mandates.md): the format every app writes its test results in, so they
+// can be aggregated. Passed to the image as ECOSYSTEM_TEST_RESULT_FORMAT; the app maps it to explicit test framework settings.
+private String ecosystemTestResultFormat() { return 'ProteomicsEcosystemStandardV1' }
+
+// Runs the aggregation script. Pinned deliberately (dependency pinning); Docker Hub is already reachable from the agents (Seq).
+private String testResultAggregationImage() { return 'python:3.13.9-slim-bookworm' }
 
 private void failOnInvalidConfiguration(Map config) {
     List<String> requiredInputNames = [
@@ -146,6 +161,8 @@ private Map resolveBuildArguments(Map config, String testResultsFolder) {
         APP_USER               : 'app',
         APP_GROUP_GID          : '0',
         TEST_RESULTS_FOLDER    : testResultsFolder,
+        // ecosystem mandate; the Dockerfile's own ARG default is the same value, so builds without it still conform
+        ECOSYSTEM_TEST_RESULT_FORMAT: testResultsFolder ? ecosystemTestResultFormat() : null,
         // pinned deliberately; ':latest' would make rebuilds non-reproducible
         SEQ_VERSION            : '2026.1.17044',
     ]
@@ -180,6 +197,17 @@ private Map resolveTower(Map config) {
         stagingBranch   : towerOverrides.stagingBranch ?: 'master',
         production      : config.towerProductionJobName,
         imageTagVariable: towerOverrides.imageTagVariable ?: 'app_generic_image_tag',
+    ]
+}
+
+private Map resolveTestResultAggregation(Map config, boolean runTests) {
+    if (!runTests || config.testResultAggregation == false) {
+        return null
+    }
+    Map overrides = config.testResultAggregation instanceof Map ? config.testResultAggregation : [:]
+    return [
+        format: overrides.format ?: ecosystemTestResultFormat(),
+        image : overrides.image ?: testResultAggregationImage(),
     ]
 }
 

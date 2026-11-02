@@ -1,0 +1,83 @@
+<testsuites>
+  <testsuite name="Fixture.Tests.dll" tests="10" skipped="1" failures="2" errors="0" time="1.3190981" timestamp="2026-11-02T00:00:00" hostname="fixture-host" id="0" package="Fixture.Tests.dll">
+    <properties />
+    <testcase classname="Fixture.Tests.BackOffTests" name="RetriesBackOff(consecutiveFailures: 4, expectedSeconds: 40)" time="0.0993876">
+      <system-out>helper output for 4
+
+</system-out>
+    </testcase>
+    <testcase classname="Fixture.Tests.BackOffTests" name="RetriesBackOff(consecutiveFailures: 3, expectedSeconds: 20)" time="0.0010463">
+      <failure type="failure" message="case 3/20 deliberately fails">case 3/20 deliberately fails
+Stack Trace:
+   at Fixture.Tests.BackOffTests.RetriesBackOff(Int32 consecutiveFailures, Int32 expectedSeconds) in /src/Tests.cs:line 17
+   at InvokeStub_BackOffTests.RetriesBackOff(Object, Span`1)
+   at System.Reflection.MethodBaseInvoker.InvokeWithFewArgs(Object obj, BindingFlags invokeAttr, Binder binder, Object[] parameters, CultureInfo culture)
+Standard Output:
+    helper output for 3</failure>
+      <system-out>helper output for 3
+
+</system-out>
+    </testcase>
+    <testcase classname="Fixture.Tests.BackOffTests" name="RetriesBackOff(consecutiveFailures: 1, expectedSeconds: 5)" time="0.0000360">
+      <system-out>helper output for 1
+
+</system-out>
+    </testcase>
+    <testcase classname="Fixture.Tests.BackOffTests" name="RetriesBackOff(consecutiveFailures: 0, expectedSeconds: 60)" time="0.0000083">
+      <system-out>helper output for 0
+
+</system-out>
+    </testcase>
+    <testcase classname="Fixture.Tests.BackOffTests" name="SlowOne" time="1.2133164" />
+    <testcase classname="Fixture.Tests.BackOffTests" name="PlainFails" time="0.0039194">
+      <failure type="failure" message="Assert.Equal() Failure: Values differ&#xD;&#xA;Expected: 1&#xD;&#xA;Actual:   2">Assert.Equal() Failure: Values differ
+Expected: 1
+Actual:   2
+Stack Trace:
+   at Fixture.Tests.BackOffTests.PlainFails() in /src/Tests.cs:line 29
+   at System.Reflection.MethodBaseInvoker.InterpretedInvoke_Method(Object obj, IntPtr* args)
+   at System.Reflection.MethodBaseInvoker.InvokeWithNoArgs(Object obj, BindingFlags invokeAttr)</failure>
+    </testcase>
+    <testcase classname="Fixture.Tests.BackOffTests" name="PlainPasses" time="0.0001096">
+      <system-out>plain pass output
+
+</system-out>
+    </testcase>
+    <testcase classname="Fixture.Tests.BackOffTests" name="NamesWithBrackets(value: &quot;plain&quot;)" time="0.0001195" />
+    <testcase classname="Fixture.Tests.BackOffTests" name="NamesWithBrackets(value: &quot;a(b)[c].d&quot;)" time="0.0001550" />
+    <testcase classname="Fixture.Tests.BackOffTests" name="Skipped" time="0.0010000">
+      <skipped />
+    </testcase>
+    <system-out>
+Test Framework Informational Messages:
+[xUnit.net 00:00:00.00] xUnit.net VSTest Adapter v3.1.5+1b188a7b0a (64-bit .NET 10.0.14)
+[xUnit.net 00:00:00.29]   Discovering: Fixture.Tests
+[xUnit.net 00:00:00.33]   Discovered:  Fixture.Tests
+[xUnit.net 00:00:00.35]   Starting:    Fixture.Tests
+console output for 4
+console output for 3
+console output for 1
+console output for 0
+[xUnit.net 00:00:00.49]       case 3/20 deliberately fails
+[xUnit.net 00:00:00.49]       Stack Trace:
+[xUnit.net 00:00:00.49]         /src/Tests.cs(17,0): at Fixture.Tests.BackOffTests.RetriesBackOff(Int32 consecutiveFailures, Int32 expectedSeconds)
+[xUnit.net 00:00:00.49]            at InvokeStub_BackOffTests.RetriesBackOff(Object, Span`1)
+[xUnit.net 00:00:00.49]            at System.Reflection.MethodBaseInvoker.InvokeWithFewArgs(Object obj, BindingFlags invokeAttr, Binder binder, Object[] parameters, CultureInfo culture)
+[xUnit.net 00:00:00.49]       Output:
+[xUnit.net 00:00:00.49]         helper output for 3
+[xUnit.net 00:00:01.71]       Assert.Equal() Failure: Values differ
+[xUnit.net 00:00:01.71]       Expected: 1
+[xUnit.net 00:00:01.71]       Actual:   2
+[xUnit.net 00:00:01.71]       Stack Trace:
+[xUnit.net 00:00:01.71]         /src/Tests.cs(29,0): at Fixture.Tests.BackOffTests.PlainFails()
+[xUnit.net 00:00:01.71]            at System.Reflection.MethodBaseInvoker.InterpretedInvoke_Method(Object obj, IntPtr* args)
+[xUnit.net 00:00:01.71]            at System.Reflection.MethodBaseInvoker.InvokeWithNoArgs(Object obj, BindingFlags invokeAttr)
+[xUnit.net 00:00:01.71]       deliberately skipped
+[xUnit.net 00:00:01.72]   Finished:    Fixture.Tests
+</system-out>
+    <system-err>Error - [xUnit.net 00:00:00.49]     Fixture.Tests.BackOffTests.RetriesBackOff(consecutiveFailures: 3, expectedSeconds: 20) [FAIL]
+Error - [xUnit.net 00:00:01.71]     Fixture.Tests.BackOffTests.PlainFails [FAIL]
+Warning - [xUnit.net 00:00:01.71]     Fixture.Tests.BackOffTests.Skipped [SKIP]
+</system-err>
+  </testsuite>
+</testsuites>
