@@ -4,17 +4,16 @@
 # Local use only: no security realm. The compose file publishes the UI on 127.0.0.1 only.
 
 jenkins:
-  systemMessage: "Jenkins TEST SERVER (jenkinstools/testserver). Local, unsecured, not the real thing."
+  # an overlay cannot set the same key again (JCasC merge conflict), so overlays change it through TESTSERVER_SYSTEM_MESSAGE
+  systemMessage: "${TESTSERVER_SYSTEM_MESSAGE:-Jenkins TEST SERVER (jenkinstools/testserver). Local, unsecured, not the real thing.}"
   numExecutors: 4
   mode: NORMAL
   securityRealm: none
   authorizationStrategy: unsecured
-  remotingSecurity:
-    enabled: true
 
 unclassified:
   location:
-    url: "${TESTSERVER_URL:-http://localhost:8090/}"
+    url: "${TESTSERVER_URL:-http://localhost:18090/}"
 
 jobs:
   # One multibranch job per local repo in TESTSERVER_REPOS ("<job name>=<path under /repos>;..."), scanned every 2 minutes,

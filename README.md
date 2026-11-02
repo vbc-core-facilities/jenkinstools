@@ -11,6 +11,12 @@ Small, reusable [Jenkins shared library](https://www.jenkins.io/doc/book/pipelin
 | `deployService` | Generic service pipeline wiring with **no defaults**: build args and BuildKit secrets, build-info reporting, in-image tests (optionally with parameterized cases aggregated) and OCP smoke, push, Tower, cockpit notification, and pre/post actions. |
 | `deployStandardProteomicsService` | The protchem conventions (namespace, branches, standard build args, secrets, tests, notification) on top of `deployService`, all overridable. A standard service needs only its image, Dockerfile and its two Tower job names. |
 
+Not pipeline steps, but in this repo too:
+
+- `testserver/`: a local Jenkins that runs real Jenkinsfiles of local repos, driven by `testserver/testserver.sh` (and the
+  Claude skill `.claude/skills/jenkins-testserver`). See [testserver/README.md](testserver/README.md).
+- `probe/pipeline-introspection/`: a Jenkinsfile that reports what a pipeline on a real Jenkins can see, without admin rights.
+
 **Failures don't break the build by default.** Any notification problem only prints a warning and the build carries on. `failOnError: true` fails the build instead. Aborting a build is never swallowed.
 
 **Requirements:** the steps run inside `node {}` and use `sh` and `curl` (7.55 or newer). `serviceBusNotify` with a connection string also needs `openssl` on the agent. `deployService` also needs IT's `buildDockerImage` (the implicitly loaded `vbc-cicd` library).

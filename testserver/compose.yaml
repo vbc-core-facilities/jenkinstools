@@ -6,8 +6,11 @@
 #   TESTSERVER_REPOS_ROOT     host folder with the repos, mounted read-only at /repos (default ../..)
 #   TESTSERVER_REPOS          "<job name>=<path under /repos>;..." one multibranch job each
 #   TESTSERVER_GIT_REDIRECTS  "<remote url>=<path inside the container>;..." git insteadOf redirects (testserver-entrypoint.sh)
-#   TESTSERVER_HTTP_BIND      where the UI is published, default 127.0.0.1:8090
+#   TESTSERVER_HTTP_BIND      where the UI is published, default 127.0.0.1:18090
 #   TESTSERVER_INSECURE_REGISTRY  a registry host the daemon talks plain HTTP to (default: none)
+#   TESTSERVER_DIND_DNS       DNS server for containers the daemon starts (builds, tests). They cannot use the compose
+#                             network's resolver, so without this docker falls back to 8.8.8.8, which some networks block.
+#                             On Docker Desktop the host's resolver is 192.168.65.7.
 
 name: jenkins-testserver
 
@@ -22,15 +25,16 @@ services:
       DOCKER_HOST: tcp://dind:2375
       # BuildKit secrets (docker build --secret) need BuildKit; the real agents have it on by default
       DOCKER_BUILDKIT: "1"
-      TESTSERVER_URL: http://${TESTSERVER_HTTP_BIND:-127.0.0.1:8090}/
+      TESTSERVER_URL: http://${TESTSERVER_HTTP_BIND:-127.0.0.1:18090}/
       TESTSERVER_REPOS: ${TESTSERVER_REPOS:-}
       TESTSERVER_GIT_REDIRECTS: ${TESTSERVER_GIT_REDIRECTS:-}
+      TESTSERVER_SYSTEM_MESSAGE: ${TESTSERVER_SYSTEM_MESSAGE:-}
     volumes:
       # the same volume at the same path in the daemon: docker.image().inside mounts workspace paths by name
       - jenkins-home:/var/jenkins_home
       - ${TESTSERVER_REPOS_ROOT:-../..}:/repos:ro
     ports:
-      - ${TESTSERVER_HTTP_BIND:-127.0.0.1:8090}:8080
+      - ${TESTSERVER_HTTP_BIND:-127.0.0.1:18090}:8080
 
   dind:
     image: docker:29.9.2-dind
@@ -40,8 +44,8 @@ services:
       # plain TCP inside the compose network only; nothing publishes 2375
       DOCKER_TLS_CERTDIR: ""
     command:
-      - --host=tcp://0.0.0.0:2375
       - --insecure-registry=${TESTSERVER_INSECURE_REGISTRY:-registry.invalid}
+      - --dns=${TESTSERVER_DIND_DNS:-8.8.8.8}
     volumes:
       - jenkins-home:/var/jenkins_home
       - dind-data:/var/lib/docker
