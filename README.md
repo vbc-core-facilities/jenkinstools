@@ -98,13 +98,13 @@ output.
 
 **Every tool in this library is versioned, independently of the others. There are no unversioned consumers.**
 
-- **Each tool has its own semver version.** It's stated in the header of its `vars/<tool>.groovy`, and each release is an immutable git tag `<tool>/vMAJOR.MINOR.PATCH`, e.g. `deployService/v1.0.0` or `vbcDeploymentCockpitNotify/v1.1.0`. A tag is never moved or deleted once pushed. A fix is a new tag.
+- **Each tool has its own semver version.** It's stated in the header of its `vars/<tool>.groovy`, and each release is an immutable git tag `<tool>-vMAJOR.MINOR.PATCH`, e.g. `deployService-v1.0.0` or `vbcDeploymentCockpitNotify-v1.1.0`. A tag is never moved or deleted once pushed. A fix is a new tag. Releases up to 2026-11-02 were tagged `<tool>/vX.Y.Z`; each also has its `<tool>-vX.Y.Z` twin on the same commit, and the slash tags stay for existing pins (ecosystem tag rule: `<name>-vX.Y.Z`, never `/`).
 - **Semver applies to the tool's arguments and behaviour:**
   - **MAJOR:** anything that could break an existing Jenkinsfile, such as a removed or renamed argument, a changed default, or a changed message schema.
   - **MINOR:** new optional arguments or behaviour.
   - **PATCH:** fixes that don't change the interface.
   - Changing a tool that others use (e.g. `serviceBusNotify`, which `deployService` uses) releases that tool. The tools that depend on it get a new release only when they want to pick the change up.
-- **A Jenkinsfile pins the tag of the tool it calls:** `library identifier: 'jenkinstools@deployStandardProteomicsService/v2.0.0', …`.
+- **A Jenkinsfile pins the tag of the tool it calls:** `library identifier: 'jenkinstools@deployStandardProteomicsService-v2.0.0', …`.
   - **How loading works:** Jenkins loads the library at that single git ref, so the tools the pinned tool uses come from the same commit. That snapshot was released and tested together.
   - **Calling several tools directly** means you pin one of their tags; the others are whatever they were at that commit.
   - **Never pin `main`** in a real pipeline. It's only for trying a change on one throwaway branch.
@@ -112,7 +112,7 @@ output.
 - **Every release updates, in the tagged commit:**
   - the version in the tool's header, plus its `toolVersion()` where it has one (the deploy tools print it in the build log)
   - the tool's section in `CHANGELOG.md`
-- **Releasing a tool:** commit, then `git tag -a <tool>/vX.Y.Z -m "<tool> vX.Y.Z" && git push origin main <tool>/vX.Y.Z`.
+- **Releasing a tool:** commit, then `git tag -a <tool>-vX.Y.Z -m "<tool> vX.Y.Z" && git push origin main <tool>-vX.Y.Z`.
 
 `v1` is a legacy whole-library tag from before per-tool versioning, kept for existing pins. See CHANGELOG.md.
 
@@ -121,7 +121,7 @@ output.
 The repository is public, so no credential or extra configuration is needed. Pin the tag of the tool you call:
 
 ```groovy
-library identifier: 'jenkinstools@deployStandardProteomicsService/v2.0.0',
+library identifier: 'jenkinstools@deployStandardProteomicsService-v2.0.0',
         retriever: modernSCM([$class: 'GitSCMSource', remote: 'https://github.com/vbc-core-facilities/jenkinstools.git'])
 ```
 
@@ -138,7 +138,7 @@ Both are used the same way: all configuration is defined as variables at the top
 ### `deployStandardProteomicsService`: a standard service
 
 ```groovy
-library identifier: 'jenkinstools@deployStandardProteomicsService/v2.0.0',
+library identifier: 'jenkinstools@deployStandardProteomicsService-v2.0.0',
         retriever: modernSCM([$class: 'GitSCMSource', remote: 'https://github.com/vbc-core-facilities/jenkinstools.git'])
 
 // ############################## configuration ##############################
