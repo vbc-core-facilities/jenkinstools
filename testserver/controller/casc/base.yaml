@@ -1,0 +1,64 @@
+# Base configuration of the Jenkins test server. An overlay (CASC files mounted at /var/jenkins_conf/overlay) adds the
+# organisation-specific part: global libraries, credentials, environment for mimics.
+#
+# Local use only: no security realm. The compose file publishes the UI on 127.0.0.1 only.
+
+jenkins:
+  systemMessage: "Jenkins TEST SERVER (jenkinstools/testserver). Local, unsecured, not the real thing."
+  numExecutors: 4
+  mode: NORMAL
+  securityRealm: none
+  authorizationStrategy: unsecured
+  remotingSecurity:
+    enabled: true
+
+unclassified:
+  location:
+    url: "${TESTSERVER_URL:-http://localhost:8090/}"
+
+jobs:
+  # One multibranch job per local repo in TESTSERVER_REPOS ("<job name>=<path under /repos>;..."), scanned every 2 minutes,
+  # so a new local commit or branch is picked up without a webhook. Branches and tags are discovered, never built
+  # automatically (see strategy below): start the build you want by hand or through the REST API.
+  - script: |
+      def spec = System.getenv('TESTSERVER_REPOS') ?: ''
+      spec.split(';').findAll { it.trim() }.each { entry ->
+        def (jobName, repoPath) = entry.split('=', 2) as List
+        multibranchPipelineJob(jobName.trim()) {
+          displayName(jobName.trim())
+          description("Local repo /repos/^${repoPath.trim()} (test server)")
+          branchSources {
+            branchSource {
+              source {
+                git {
+                  id(jobName.trim())
+                  remote("file:///repos/^${repoPath.trim()}")
+                  traits {
+                    gitBranchDiscovery()
+                    gitTagDiscovery()
+                  }
+                }
+              }
+              // nothing builds by itself: a scan only discovers, every build is started by hand. A real pipeline builds,
+              // pushes (to the mimic) and runs tests; doing that for every branch of every repo on each scan is not wanted.
+              strategy {
+                allBranchesSame {
+                  props {
+                    suppressAutomaticTriggering()
+                  }
+                }
+              }
+            }
+          }
+          orphanedItemStrategy {
+            discardOldItems {
+              numToKeep(20)
+            }
+          }
+          triggers {
+            periodicFolderTrigger {
+              interval('2m')
+            }
+          }
+        }
+      }

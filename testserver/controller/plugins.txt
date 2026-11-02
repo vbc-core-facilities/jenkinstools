@@ -1,0 +1,14 @@
+# Jenkins plugins of the test server, pinned to the versions resolved on 2026-11-02 for jenkins 2.580.2 (dependency pinning).
+# Dependencies are resolved by jenkins-plugin-cli. To bump: remove the versions, run freeze-plugins.sh, review the diff.
+configuration-as-code:2144.ve8c697101488
+job-dsl:3732.v9a_c49a_61a_313
+workflow-aggregator:608.v67378e9d3db_1
+workflow-multibranch:842.v3a_b_59b_57b_e6e
+pipeline-groovy-lib:822.vc95f70dea_db_7
+git:5.11.0
+docker-workflow:653.v2f2c08eff0ec
+junit:1456.vdb_4425ca_0d4d
+credentials-binding:728.v902a_273b_8947
+pipeline-stage-view:2.41
+pipeline-graph-view:1053.v9df19e6ceed2
+timestamper:1.30

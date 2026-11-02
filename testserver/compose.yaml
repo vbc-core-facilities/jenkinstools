@@ -1,0 +1,51 @@
+# Jenkins test server: a Jenkins controller and its own docker daemon (docker:dind), isolated from the host's docker.
+# Generic; an organisation preset extends these services (extends: file: .../jenkinstools/testserver/compose.yaml) and adds
+# its overlay configuration, mimics and registries. See README.md.
+#
+# Settings (environment or .env):
+#   TESTSERVER_REPOS_ROOT     host folder with the repos, mounted read-only at /repos (default ../..)
+#   TESTSERVER_REPOS          "<job name>=<path under /repos>;..." one multibranch job each
+#   TESTSERVER_GIT_REDIRECTS  "<remote url>=<path inside the container>;..." git insteadOf redirects (testserver-entrypoint.sh)
+#   TESTSERVER_HTTP_BIND      where the UI is published, default 127.0.0.1:8090
+#   TESTSERVER_INSECURE_REGISTRY  a registry host the daemon talks plain HTTP to (default: none)
+
+name: jenkins-testserver
+
+services:
+  jenkins:
+    build:
+      context: ./controller
+    restart: unless-stopped
+    depends_on:
+      - dind
+    environment:
+      DOCKER_HOST: tcp://dind:2375
+      # BuildKit secrets (docker build --secret) need BuildKit; the real agents have it on by default
+      DOCKER_BUILDKIT: "1"
+      TESTSERVER_URL: http://${TESTSERVER_HTTP_BIND:-127.0.0.1:8090}/
+      TESTSERVER_REPOS: ${TESTSERVER_REPOS:-}
+      TESTSERVER_GIT_REDIRECTS: ${TESTSERVER_GIT_REDIRECTS:-}
+    volumes:
+      # the same volume at the same path in the daemon: docker.image().inside mounts workspace paths by name
+      - jenkins-home:/var/jenkins_home
+      - ${TESTSERVER_REPOS_ROOT:-../..}:/repos:ro
+    ports:
+      - ${TESTSERVER_HTTP_BIND:-127.0.0.1:8090}:8080
+
+  dind:
+    image: docker:29.9.2-dind
+    restart: unless-stopped
+    privileged: true
+    environment:
+      # plain TCP inside the compose network only; nothing publishes 2375
+      DOCKER_TLS_CERTDIR: ""
+    command:
+      - --host=tcp://0.0.0.0:2375
+      - --insecure-registry=${TESTSERVER_INSECURE_REGISTRY:-registry.invalid}
+    volumes:
+      - jenkins-home:/var/jenkins_home
+      - dind-data:/var/lib/docker
+
+volumes:
+  jenkins-home:
+  dind-data:
