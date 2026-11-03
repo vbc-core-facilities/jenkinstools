@@ -42,10 +42,11 @@ crumb_header() {
 	curl -sf -c "${COOKIES}" "${URL}/crumbIssuer/api/json" | json_field "d['crumbRequestField']+':'+d['crumb']"
 }
 
-post() { # post <url> ; prints the Location header
-	local crumb
+post() { # post <url> [curl args, e.g. --data-urlencode NAME=value] ; prints the Location header
+	local crumb url=$1
+	shift
 	crumb=$(crumb_header) || die "cannot reach ${URL}"
-	curl -s -b "${COOKIES}" -H "${crumb}" -X POST -D - -o /dev/null "$1" | tr -d '\r' | sed -n 's/^[Ll]ocation: //p'
+	curl -s -b "${COOKIES}" -H "${crumb}" -X POST -D - -o /dev/null "$@" "${url}" | tr -d '\r' | sed -n 's/^[Ll]ocation: //p'
 }
 
 wait_ready() {
