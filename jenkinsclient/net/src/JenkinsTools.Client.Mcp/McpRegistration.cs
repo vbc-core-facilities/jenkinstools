@@ -3,7 +3,7 @@ using Microsoft.AspNetCore.Routing;
 using Microsoft.Extensions.DependencyInjection;
 using ModelContextProtocol.AspNetCore;
 
-namespace Xen.JenkinsClient.Mcp;
+namespace JenkinsTools.Client.Mcp;
 
 public static class McpRegistration
 {

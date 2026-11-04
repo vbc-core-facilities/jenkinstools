@@ -1,5 +1,6 @@
 <Project>
-  <!-- every project of jenkinsclient/net: language policy, and the version from the component's git tags (jenkinsclient-vX.Y.Z) -->
+  <!-- every project of jenkinsclient/net: language policy, and the version from the component's git tags (jenkinsclient-vX.Y.Z).
+       Packaging is separate (Packaging.props), imported only by the one packable project. -->
   <PropertyGroup>
     <TargetFramework>net10.0</TargetFramework>
     <Nullable>enable</Nullable>
@@ -10,9 +11,6 @@
     <NoWarn>$(NoWarn);CS1591</NoWarn>
     <MinVerTagPrefix>jenkinsclient-v</MinVerTagPrefix>
     <MinVerDefaultPreReleaseIdentifiers>alpha.0</MinVerDefaultPreReleaseIdentifiers>
-    <Authors>Juraj Ahel</Authors>
-    <PackageLicenseExpression>MIT</PackageLicenseExpression>
-    <RepositoryUrl>https://github.com/vbc-core-facilities/jenkinstools</RepositoryUrl>
   </PropertyGroup>
   <ItemGroup>
     <PackageReference Include="MinVer" Version="8.0.0" PrivateAssets="all" />

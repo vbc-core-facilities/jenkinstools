@@ -3,7 +3,7 @@ using System.Runtime.InteropServices;
 using System.Runtime.Versioning;
 using System.Text;
 
-namespace Xen.JenkinsClient;
+namespace JenkinsTools.Client;
 
 /// <summary>
 /// Generic credentials in the Windows Credential Manager of the current user: encrypted for that Windows account (DPAPI),

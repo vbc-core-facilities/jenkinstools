@@ -3,13 +3,13 @@
   <PropertyGroup>
     <Description>jenkinsclient: the MCP server (stdio, or HTTP on loopback) and the command line (check, sites, set-token).</Description>
     <AssemblyName>jenkinsclient</AssemblyName>
-    <RootNamespace>Xen.JenkinsClient.Host</RootNamespace>
+    <RootNamespace>JenkinsTools.Client.Host</RootNamespace>
     <IsPackable>false</IsPackable>
   </PropertyGroup>
 
   <ItemGroup>
-    <ProjectReference Include="..\Xen.JenkinsClient\Xen.JenkinsClient.csproj" />
-    <ProjectReference Include="..\Xen.JenkinsClient.Mcp\Xen.JenkinsClient.Mcp.csproj" />
+    <ProjectReference Include="..\JenkinsTools.Client\JenkinsTools.Client.csproj" />
+    <ProjectReference Include="..\JenkinsTools.Client.Mcp\JenkinsTools.Client.Mcp.csproj" />
   </ItemGroup>
 
 </Project>

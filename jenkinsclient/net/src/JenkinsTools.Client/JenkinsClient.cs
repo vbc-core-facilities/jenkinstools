@@ -4,7 +4,7 @@ using System.Text;
 using System.Text.Json;
 using System.Text.RegularExpressions;
 
-namespace Xen.JenkinsClient;
+namespace JenkinsTools.Client;
 
 /// <summary>
 /// One Jenkins, through its public REST API only (<c>.../api/json</c>, <c>consoleText</c>, <c>build</c>, <c>stop</c>, the
@@ -31,7 +31,7 @@ public sealed class JenkinsClient : IDisposable
         Username = token is null ? null : username;
         _authenticated = token is not null;
         _http = new HttpClient(handler) { BaseAddress = BaseUrl, Timeout = timeout ?? TimeSpan.FromSeconds(100) };
-        _http.DefaultRequestHeaders.UserAgent.ParseAdd($"Xen.JenkinsClient/{typeof(JenkinsClient).Assembly.GetName().Version}");
+        _http.DefaultRequestHeaders.UserAgent.ParseAdd($"JenkinsTools.Client/{typeof(JenkinsClient).Assembly.GetName().Version}");
         if (token is not null)
         {
             _http.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Basic",

@@ -1,0 +1,43 @@
+<Project>
+
+	<!--
+	    Packaging of the one package of jenkinsclient/net: JenkinsTools.Client, for the private feed github_vbc_proteomics
+	    (the feed of the VBC proteomics repos; a repository in vbc-core-facilities publishes there, Xen.* packages come only
+	    from xeniorn repositories, to nuget.org).
+
+	    Imported explicitly by the packable csproj (as in hive.contracts), which keeps PackageId, Description, PackageTags.
+	    The version comes from the git tags jenkinsclient-vX.Y.Z (MinVer, Directory.Build.props).
+
+	    Push on pack, from the developer's machine, as the other private-feed repos do: `dotnet pack` builds AND
+	    publishes. Never run it to "just look at the package"; use `dotnet build`. A Debug pack re-packs Release and that
+	    nested build pushes (two targets, not one inverted condition, or the outer Debug build pushes too); the artifact is
+	    named by PackageId so a Debug build can never push bin\Debug.
+	-->
+
+	<PropertyGroup>
+		<Company>Vienna BioCenter</Company>
+		<Authors>Juraj Ahel</Authors>
+		<RepositoryUrl>https://github.com/vbc-core-facilities/jenkinstools</RepositoryUrl>
+		<PackageReadmeFile Condition="Exists('$(MSBuildProjectDirectory)\README.md')">README.md</PackageReadmeFile>
+	</PropertyGroup>
+
+	<ItemGroup Condition="Exists('$(MSBuildProjectDirectory)\README.md')">
+		<None Include="README.md" Pack="true" PackagePath="\" />
+	</ItemGroup>
+
+	<PropertyGroup>
+		<!--This entry needs to exist in nuget.config-->
+		<NugetSourceName>github_vbc_proteomics</NugetSourceName>
+		<!--This env var needs to exist and hold a PAT with write access to the feed-->
+		<NugetApiKeyEnvVar>TOKEN_GITHUB_NUGET_VBCPROTEOMICS</NugetApiKeyEnvVar>
+	</PropertyGroup>
+
+	<Target Name="NugetRepackRelease" AfterTargets="Pack" Condition="'$(Configuration)' == 'Debug'">
+		<Exec Command="dotnet pack &quot;$(MSBuildProjectFullPath)&quot; --configuration Release" />
+	</Target>
+
+	<Target Name="NugetPushRelease" AfterTargets="Pack" Condition="'$(Configuration)' == 'Release'">
+		<Exec Command="dotnet nuget push &quot;$(MSBuildProjectDirectory)\bin\Release\$(PackageId).$(PackageVersion).nupkg&quot; --source $(NugetSourceName) --api-key %$(NugetApiKeyEnvVar)% --skip-duplicate" />
+	</Target>
+
+</Project>

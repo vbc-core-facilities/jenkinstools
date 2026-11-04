@@ -44,7 +44,7 @@ param(
 
 $ErrorActionPreference = 'Stop'
 $net = Resolve-Path (Join-Path $PSScriptRoot '..')
-$project = Join-Path $net 'src\Xen.JenkinsClient.Host'
+$project = Join-Path $net 'src\JenkinsTools.Client.Host'
 
 $version = (& git -C $net describe --tags --match 'jenkinsclient-v*' --always --dirty 2>$null) ?? 'unversioned'
 $destination = Join-Path $Root "$version`_$(Get-Date -Format 'yyyyMMdd-HHmmss')"

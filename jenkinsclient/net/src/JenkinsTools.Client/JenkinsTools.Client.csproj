@@ -1,14 +1,16 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
+  <Import Project="..\..\Packaging.props" />
+
   <PropertyGroup>
-    <PackageId>Xen.JenkinsClient</PackageId>
+    <PackageId>JenkinsTools.Client</PackageId>
     <Description>Client for the public REST API of any Jenkins: sites with user + API token (token by reference: Windows Credential Manager, 1Password, env, file), jobs and multibranch branches, builds, console logs, test reports, queue, scan, start, wait, abort. No dependencies beyond the BCL.</Description>
     <PackageTags>jenkins;rest;client;ci</PackageTags>
     <IsPackable>true</IsPackable>
   </PropertyGroup>
 
   <ItemGroup>
-    <InternalsVisibleTo Include="Xen.JenkinsClient.Tests" />
+    <InternalsVisibleTo Include="JenkinsTools.Client.Tests" />
   </ItemGroup>
 
 </Project>

@@ -15,7 +15,7 @@
   </ItemGroup>
 
   <ItemGroup>
-    <ProjectReference Include="..\..\src\Xen.JenkinsClient\Xen.JenkinsClient.csproj" />
+    <ProjectReference Include="..\..\src\JenkinsTools.Client\JenkinsTools.Client.csproj" />
   </ItemGroup>
 
 </Project>

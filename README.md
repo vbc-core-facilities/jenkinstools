@@ -17,7 +17,7 @@ Not pipeline steps, but in this repo too:
   Claude skill `.claude/skills/jenkins-testserver`). See [testserver/README.md](testserver/README.md).
 - `probe/pipeline-introspection/`: a Jenkinsfile that reports what a pipeline on a real Jenkins can see, without admin rights.
 - `jenkinsclient/`: a client of any Jenkins through its public REST API: MCP server (stdio, or HTTP on loopback), command
-  line and the .NET library `Xen.JenkinsClient`. Sites with user + API token by reference (Windows Credential Manager,
+  line and the .NET library `JenkinsTools.Client`. Sites with user + API token by reference (Windows Credential Manager,
   1Password, env, file). See [jenkinsclient/README.md](jenkinsclient/README.md).
 
 Jenkins loads this whole repository as the shared library: `vars/`, `resources/` and a root `src/` (the Groovy classpath)

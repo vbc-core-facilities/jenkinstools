@@ -1,4 +1,4 @@
-namespace Xen.JenkinsClient;
+namespace JenkinsTools.Client;
 
 /// <summary>One Jenkins this client talks to, by a short name of the caller's choice (e.g. <c>vbc</c>, <c>testserver</c>).</summary>
 public sealed class JenkinsSiteOptions

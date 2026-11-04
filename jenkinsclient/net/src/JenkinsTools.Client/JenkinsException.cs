@@ -1,6 +1,6 @@
 using System.Net;
 
-namespace Xen.JenkinsClient;
+namespace JenkinsTools.Client;
 
 public enum JenkinsFailure
 {

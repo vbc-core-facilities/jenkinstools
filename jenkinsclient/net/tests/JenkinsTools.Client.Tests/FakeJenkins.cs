@@ -1,7 +1,7 @@
 using System.Net;
 using System.Text;
 
-namespace Xen.JenkinsClient.Tests;
+namespace JenkinsTools.Client.Tests;
 
 /// <summary>A scripted Jenkins: answers by method and path (+query), records every request.</summary>
 internal sealed class FakeJenkins : HttpMessageHandler

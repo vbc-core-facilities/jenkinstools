@@ -1,9 +1,9 @@
 using System.Net;
 using System.Text;
 using System.Text.Json;
-using Xen.JenkinsClient;
-using Xen.JenkinsClient.Host;
-using Xen.JenkinsClient.Mcp;
+using JenkinsTools.Client;
+using JenkinsTools.Client.Host;
+using JenkinsTools.Client.Mcp;
 
 // jenkinsclient --stdio                 MCP over stdin/stdout (started by the MCP client, e.g. Claude Code)
 // jenkinsclient serve [--port 5190]     MCP over streamable HTTP at http://127.0.0.1:<port>/mcp (loopback only)
@@ -32,7 +32,7 @@ catch (JenkinsException e)
     return 2;
 }
 
-namespace Xen.JenkinsClient.Host
+namespace JenkinsTools.Client.Host
 {
     internal static class Settings
     {

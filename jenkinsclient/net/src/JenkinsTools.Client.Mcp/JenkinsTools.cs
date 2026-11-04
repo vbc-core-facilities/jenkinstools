@@ -3,7 +3,7 @@ using Microsoft.Extensions.Logging;
 using ModelContextProtocol;
 using ModelContextProtocol.Server;
 
-namespace Xen.JenkinsClient.Mcp;
+namespace JenkinsTools.Client.Mcp;
 
 /// <summary>MCP face of <see cref="JenkinsSites"/>: argument parsing and error translation only.</summary>
 [McpServerToolType]

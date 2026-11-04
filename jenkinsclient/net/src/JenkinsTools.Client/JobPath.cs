@@ -1,4 +1,4 @@
-namespace Xen.JenkinsClient;
+namespace JenkinsTools.Client;
 
 /// <summary>
 /// Addresses a job: folder and job names separated by <c>/</c> (<c>team/repo</c>), plus, for a multibranch job, the branch

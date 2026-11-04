@@ -79,10 +79,26 @@ A shared HTTP host with per-caller credentials is in [FUTURE_WORK.md](FUTURE_WOR
 
 ## The library
 
-`Xen.JenkinsClient` (`net/src/Xen.JenkinsClient`, no dependencies beyond the BCL): `JenkinsSites` (configured sites →
+`JenkinsTools.Client` (`net/src/JenkinsTools.Client`, no dependencies beyond the BCL): `JenkinsSites` (configured sites →
 clients, token references resolved), `JenkinsClient` (one site), `JobPath`, `SecretReferences`. It is meant to replace
-the Jenkins clients in VbcDeploymentCockpit (`JenkinsLib`) and ProteomicsEcosystemDeveloperAgent. Publishing it to
-nuget.org from `jenkinsclient-v*` tags is the next step (not set up yet).
+the Jenkins clients in VbcDeploymentCockpit (`JenkinsLib`) and ProteomicsEcosystemDeveloperAgent.
+
+It is the only package here, and it goes to the **private feed** `github_vbc_proteomics`
+(`https://nuget.pkg.github.com/vbc-proteomics-org/index.json`), like the other packages of VBC repositories. Package ids
+of VBC repositories carry no personal prefix; `Xen.*` packages come only from xeniorn repositories (to nuget.org).
+The plain `JenkinsClient` is taken on nuget.org, and our consumers restore from both feeds, hence `JenkinsTools.Client`.
+`JenkinsTools.Client.Mcp` and `JenkinsTools.Client.Host` are the application, built from source by the install script,
+never packaged.
+
+Publishing a version (push on pack, as the other private-feed repos; see `net/Packaging.props`):
+
+```powershell
+# after tagging jenkinsclient-vX.Y.Z on the commit; needs TOKEN_GITHUB_NUGET_VBCPROTEOMICS (a PAT with write:packages)
+dotnet pack jenkinsclient/net/src/JenkinsTools.Client -c Release     # builds AND pushes JenkinsTools.Client X.Y.Z
+```
+
+`dotnet pack` always pushes: use `dotnet build` to check that it builds. Restore only uses nuget.org (`net/nuget.config`
+maps every package there), so building needs no feed token.
 
 ## Build and test
 

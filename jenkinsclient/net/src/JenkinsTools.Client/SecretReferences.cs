@@ -1,6 +1,6 @@
 using System.Diagnostics;
 
-namespace Xen.JenkinsClient;
+namespace JenkinsTools.Client;
 
 /// <summary>
 /// Turns a secret reference into its value, so configuration never holds a token:

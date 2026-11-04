@@ -2,9 +2,9 @@
 
 Not needed now; written down so it is not lost.
 
-- **Publish `Xen.JenkinsClient` to nuget.org** from `jenkinsclient-v*` tags: a GitHub Actions release workflow with
-  NuGet Trusted Publishing (no stored key), as in `Xen.Utils.ApiKeyMinting`. To check first: Actions enabled for
-  `vbc-core-facilities`. Never push from a developer machine.
+- **Release from CI instead of push on pack**: a tag `jenkinsclient-vX.Y.Z` builds, tests and pushes
+  `JenkinsTools.Client` to the private feed, so no release depends on a developer machine (the known gap of the NuGet
+  packaging principle, shared with the other private-feed repos).
 - **Move the consumers onto the library**: VbcDeploymentCockpit `JenkinsLib`, ProteomicsEcosystemDeveloperAgent
   `Sources/Jenkins/JenkinsClient.cs`. Each when it next needs something from Jenkins.
 - **Python** (`jenkinsclient/python/`): the same client for Python consumers, wherever the .NET library is used.

@@ -1,10 +1,10 @@
 <Solution>
   <Folder Name="/src/">
-    <Project Path="src/Xen.JenkinsClient/Xen.JenkinsClient.csproj" />
-    <Project Path="src/Xen.JenkinsClient.Mcp/Xen.JenkinsClient.Mcp.csproj" />
-    <Project Path="src/Xen.JenkinsClient.Host/Xen.JenkinsClient.Host.csproj" />
+    <Project Path="src/JenkinsTools.Client/JenkinsTools.Client.csproj" />
+    <Project Path="src/JenkinsTools.Client.Mcp/JenkinsTools.Client.Mcp.csproj" />
+    <Project Path="src/JenkinsTools.Client.Host/JenkinsTools.Client.Host.csproj" />
   </Folder>
   <Folder Name="/tests/">
-    <Project Path="tests/Xen.JenkinsClient.Tests/Xen.JenkinsClient.Tests.csproj" />
+    <Project Path="tests/JenkinsTools.Client.Tests/JenkinsTools.Client.Tests.csproj" />
   </Folder>
 </Solution>

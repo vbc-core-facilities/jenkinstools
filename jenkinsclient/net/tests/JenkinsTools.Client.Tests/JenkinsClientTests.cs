@@ -2,7 +2,7 @@ using Xunit;
 using System.Net;
 using System.Text;
 
-namespace Xen.JenkinsClient.Tests;
+namespace JenkinsTools.Client.Tests;
 
 public sealed class JobPathTests
 {

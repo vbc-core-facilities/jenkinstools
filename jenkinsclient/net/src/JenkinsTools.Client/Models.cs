@@ -1,4 +1,4 @@
-namespace Xen.JenkinsClient;
+namespace JenkinsTools.Client;
 
 public sealed record WhoAmI(
     string Site,
