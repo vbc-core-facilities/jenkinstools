@@ -169,16 +169,16 @@ deployStandardProteomicsService(
 | `imageNamespace` | `protchem` | any value |
 | `pushBranches` | `['master', 'develop']` | any list |
 | `tower` | staging job on pushes to `master`; production job on tags with `app_generic_image_tag: <tag>` | A Map with `stagingBranch` and/or `imageTagVariable`. `false` for no Tower (build and push only) |
-| `testResultsFolder` | `/app/tests/results` | any path. `tests: false` means no test step at all |
+| `testResultsFolder` | `/app/tests/results` | any path. `tests: false`: the image has no tests, no results are collected (the OCP smoke still runs) |
 | `testFailureOutcome` | `'unstable'`: failed tests mark the build UNSTABLE, the image is still pushed and deployed | `'ignore'` (the build result is not changed) or `'abort'` (the build fails before the push and the Tower deploy). No test result file at all counts as failed tests, so a service without tests sets `tests: false` |
-| `ocpSmoke` | on | `false` |
+| `ocpSmoke` | on, also with `tests: false` | `false` |
 | `buildArgs` | `NUGET_REPO_USER=vbc-proteomics`, `MINVER_VERSION_OVERRIDE=<tag without v>`, `APP_USER=app`, `APP_GROUP_GID=0`, `TEST_RESULTS_FOLDER=<testResultsFolder>`, `SEQ_VERSION=2026.1.17044` | Merged over the defaults; any new names work, and `null` removes one (e.g. `[SEQ_VERSION: null]` for no Seq). `defaultBuildArgs: false` starts empty (`dockerHttpPort` still applies) |
 | `secrets` | `SECRETS-NUGET-REPO-PW` from `vbc-proteomics-github-pat` | Merged by `id`; any new secrets work. `defaultSecrets: false` starts empty |
 | `cockpitNotify` | `[credentialsId: 'vbc-cockpit-service-bus-send']` | Another Map, or `false` |
 | `imageRegistry` | `docker.artifactory.imp.ac.at` | any host. Where the image is pushed. Also used by the always-on image coherence check (see below) |
 | `highFidelity` | `true` on tag builds, `false` otherwise | `true` or `false`. With it, the image coherence check fails the build when the pushed image holds another commit than the one built; without it the build is only UNSTABLE |
 
-`testScript` and `ocpSmokeExtraChecks` pass through when tests are on. Anything else is passed straight to `deployService`, e.g. `towerJobs` and the actions.
+`testScript` passes through when tests are on, `ocpSmokeExtraChecks` always. Anything else is passed straight to `deployService`, e.g. `towerJobs` and the actions.
 
 ### `deployService`: the wiring, no defaults
 

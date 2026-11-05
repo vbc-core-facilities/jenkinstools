@@ -1,5 +1,5 @@
 /**
- * Version 2.4.0 - released as tag deployStandardProteomicsService-v2.4.0 (see CHANGELOG.md). Bump both with every change to this file.
+ * Version 2.5.0 - released as tag deployStandardProteomicsService-v2.5.0 (see CHANGELOG.md). Bump both with every change to this file.
  *
  * The VBC proteomics (protchem) service conventions on top of deployService: it fills in the
  * standard namespace, branches, build args, secrets, tests and notification, so a standard
@@ -27,14 +27,15 @@
  *   tower                   [stagingBranch: 'master', imageTagVariable: 'app_generic_image_tag'];
  *                           a Map overrides either; false = no Tower (build and push only).
  *                           Staging runs on pushes to stagingBranch, production on tags.
- *   testResultsFolder       '/app/tests/results' (tests: false for no test step at all)
+ *   testResultsFolder       '/app/tests/results' (tests: false: the image has no tests, nothing is collected; the OCP
+ *                           smoke still runs unless ocpSmoke: false)
  *   testScript              none; passed through when tests are on
  *   testFailureOutcome      'unstable' when tests are on: failed tests mark the build UNSTABLE and the image is still pushed
  *                           and deployed (what every service did before 2.4.0). 'ignore' leaves the build result alone,
  *                           'abort' fails the build before the push and the Tower deploy (see deployService).
  *                           No test result file at all counts as failed tests: a service without tests sets tests: false.
- *   ocpSmoke                true
- *   ocpSmokeExtraChecks     none; passed through when tests are on
+ *   ocpSmoke                true, also with tests: false (it checks the image, not the tests); false turns it off
+ *   ocpSmokeExtraChecks     none; passed through
  *   testResultAggregation   [format: 'ProteomicsEcosystemStandardV1', image: 'python:3.13.9-slim-bookworm'] when tests are on;
  *                           a Map overrides either; false = publish the raw cases (see deployService)
  *   keepLongTestOutput      true when tests are on: the full output of passing tests is kept too; false = Jenkins' default
@@ -78,8 +79,9 @@ def call(Map config = [:]) {
         tower              : tower,
         testResultsFolder  : testResultsFolder,
         testScript         : runTests ? config.testScript : null,
-        ocpSmoke           : runTests && config.ocpSmoke != false,
-        ocpSmokeExtraChecks: runTests ? config.ocpSmokeExtraChecks : null,
+        // the OCP smoke checks the image, not its tests: tests: false leaves it on (before 2.5.0 it switched it off too)
+        ocpSmoke           : config.ocpSmoke != false,
+        ocpSmokeExtraChecks: config.ocpSmokeExtraChecks,
         testResultAggregation: resolveTestResultAggregation(config, runTests),
         keepLongTestOutput : runTests ? (config.keepLongTestOutput != false) : null,
         testFailureOutcome : runTests ? (config.testFailureOutcome ?: 'unstable') : null,
@@ -119,7 +121,7 @@ def call(Map config = [:]) {
 }
 
 // This tool's own version; bump it (and tag deployStandardProteomicsService-vX.Y.Z) with every change to this file.
-private String toolVersion() { return '2.4.0' }
+private String toolVersion() { return '2.5.0' }
 
 // Ecosystem mandate (proteomics_ecosystem/docs/ecosystem-mandates.md): the format every app writes its test results in, so they
 // can be aggregated. Passed to the image as ECOSYSTEM_TEST_RESULT_FORMAT; the app maps it to explicit test framework settings.

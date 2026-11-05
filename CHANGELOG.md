@@ -5,6 +5,12 @@ see [Versioning](README.md#versioning). Newest first within each tool.
 
 ## deployStandardProteomicsService
 
+### deployStandardProteomicsService-v2.5.0 - 2026-11-05
+`tests: false` no longer switches off the OCP smoke: it means only that the image has no tests (no results folder, no
+`testFailureOutcome`). `ocpSmoke: false` turns the smoke off, and `ocpSmokeExtraChecks` pass through either way. A service
+that set `tests: false` gets the smoke from this version on (before, it had no test step at all).
+Uses deployService-v2.4.0.
+
 ### deployStandardProteomicsService-v2.4.0 - 2026-11-05
 New `testFailureOutcome` (default `'unstable'` when tests run): what failed tests do to the build. `'ignore'` leaves the result
 alone, `'abort'` fails the build before the push and the Tower deploy. New with the default: no test result file at all now
