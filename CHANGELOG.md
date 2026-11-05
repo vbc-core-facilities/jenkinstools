@@ -5,7 +5,7 @@ see [Versioning](README.md#versioning). Newest first within each tool.
 
 ## deployStandardProteomicsService
 
-### deployStandardProteomicsService-v2.4.0 - unreleased
+### deployStandardProteomicsService-v2.4.0 - 2026-11-05
 New `testFailureOutcome` (default `'unstable'` when tests run): what failed tests do to the build. `'ignore'` leaves the result
 alone, `'abort'` fails the build before the push and the Tower deploy. New with the default: no test result file at all now
 marks the build UNSTABLE (it passed silently before); a service without tests sets `tests: false`.
@@ -57,7 +57,7 @@ All of them can be overridden, and `null` removes a default build arg.
 
 ## deployService
 
-### deployService-v2.4.0 - unreleased
+### deployService-v2.4.0 - 2026-11-05
 New optional `testFailureOutcome` (`'ignore'`, `'unstable'`, `'abort'`, needs `testResultsFolder`): failed testcases, a non-zero
 `testScript`, an error while running the tests and no result file at all count as failed tests, and the outcome decides.
 `'abort'` fails the test stage, so `buildDockerImage` neither pushes nor deploys. Omitted: unchanged behaviour.
@@ -157,6 +157,9 @@ First release (shipped in `v1`): `jenkins-build-event/v1` messages.
 
 Not a library tool: the local Jenkins test server (`testserver/`), versioned with tags `testserver-vX.Y.Z` so that
 organisation presets (e.g. vbc_deployment `JenkinsTestServerVbc`) can name the release they were made with.
+
+### testserver-v1.0.1 - 2026-11-05
+`testserver.sh build <job> <branch> NAME=value` passes the parameters to Jenkins (they were silently dropped).
 
 ### testserver-v1.0.0 - 2026-11-02
 First release: pinned Jenkins LTS and plugins, own `dind` daemon, JCasC with an overlay folder for presets, multibranch

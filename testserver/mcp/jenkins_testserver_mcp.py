@@ -25,7 +25,7 @@ import urllib.parse
 import urllib.request
 
 SERVER_NAME = "jenkins-testserver"
-SERVER_VERSION = "1.0.0"
+SERVER_VERSION = "1.0.1"
 SUPPORTED_PROTOCOL_VERSIONS = ("2025-06-18", "2025-03-26", "2024-11-05")
 
 URL = os.environ.get("TESTSERVER_URL", "http://127.0.0.1:18090").rstrip("/")
