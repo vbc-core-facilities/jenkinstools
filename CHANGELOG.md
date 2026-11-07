@@ -5,7 +5,7 @@ see [Versioning](README.md#versioning). Newest first within each tool.
 
 ## jenkinsclient
 
-### jenkinsclient-v0.1.0 - unreleased
+### jenkinsclient-v0.1.0 - 2026-11-08
 First version: JenkinsTools.Client (.NET library: sites, token references, jobs, builds, console logs, test reports, queue,
 scan, start, wait, abort), the MCP server `jenkinsclient` (stdio; HTTP on loopback) and its command line (`check`, `sites`,
 `set-token`), and `net/tools/Install-JenkinsClientStdio.ps1` (versioned installs, Claude Code registration).
