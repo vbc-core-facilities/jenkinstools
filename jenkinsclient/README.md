@@ -58,14 +58,17 @@ is such a file (VBC: vbc_deployment `JenkinsClientVbc/settings.json`).
 
 ```powershell
 pwsh -NoProfile -File jenkinsclient/net/tools/Install-JenkinsClientStdio.ps1 -Settings <preset settings.json>
-jenkinsclient set-token <site>      # the path is printed by the install; or use the full path of jenkinsclient.exe
-jenkinsclient check
+& "$env:LOCALAPPDATA\JenkinsClient\current\jenkinsclient.exe" set-token <site>
+& "$env:LOCALAPPDATA\JenkinsClient\current\jenkinsclient.exe" check
 ```
 
-The script publishes into `%LOCALAPPDATA%\JenkinsClient\versions\<version>_<time>` and registers that copy as the
-user-scope MCP server `jenkinsclient` (`--stdio`). Re-run it to update: open sessions keep their copy, new sessions get the
-new one, unused old copies are deleted (AzureTools' scheme). The user settings file is never overwritten (`-ForceSettings`
-does, keeping a `.bak`).
+The script publishes into `%LOCALAPPDATA%\JenkinsClient\versions\<version>_<time>`, points the directory junction
+`%LOCALAPPDATA%\JenkinsClient\current` at that copy and registers the user-scope MCP server `jenkinsclient` as
+`%LOCALAPPDATA%\JenkinsClient\current\jenkinsclient.exe --stdio`. That command never changes, so a machine setup can name
+it and detect drift. Re-run the script to update: only the junction moves; open sessions keep running from their version
+folder, new sessions (and `/mcp` reconnects) start the new one. Old copies are deleted once no process runs from them (a
+copy is first renamed, which Windows refuses while it is in use; such a copy goes on a later install). The user settings
+file is never overwritten (`-ForceSettings` does, keeping a `.bak`).
 
 ## Modes of the program
 

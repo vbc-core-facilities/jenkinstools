@@ -1,15 +1,17 @@
 <#
 .SYNOPSIS
-    Publishes jenkinsclient into a new versioned folder and registers that copy with Claude Code as the stdio MCP server
-    "jenkinsclient".
+    Publishes jenkinsclient into a new versioned folder, points the junction "current" at it and registers
+    current\jenkinsclient.exe with Claude Code as the stdio MCP server "jenkinsclient".
 
 .DESCRIPTION
     In stdio mode the MCP client starts the server itself, per session, so nothing has to be running beforehand.
 
     Every Claude session keeps its own server process, and Windows locks a running program's files. So an update never
-    overwrites a copy: each install publishes into its own folder under Root (git version + time stamp), points the
-    user-scope registration at it, and deletes older copies no process runs from (locked ones go on a later install).
-    Running sessions keep their server; new sessions (and /mcp reconnects) start the new one. Same scheme as AzureTools.
+    overwrites a copy: each install publishes into its own folder under Root (git version + time stamp), re-points the
+    directory junction Current (%LOCALAPPDATA%\JenkinsClient\current) at it, and deletes older copies no process runs
+    from (locked ones go on a later install). The user-scope registration always names Current\jenkinsclient.exe, a
+    command that never changes. Running sessions keep their server (the junction is only resolved when a process
+    starts); new sessions (and /mcp reconnects) start the new one.
 
     Sites are not part of the install: they live in the user settings file (%LOCALAPPDATA%\JenkinsClient\settings.json),
     which updates never touch. -Settings copies a preset there (e.g. vbc_deployment JenkinsClientVbc\settings.json), but
@@ -17,6 +19,10 @@
 
 .PARAMETER Root
     Folder holding the versioned copies.
+
+.PARAMETER Current
+    The directory junction pointing at the newest copy; the registered command and the printed command line go
+    through it.
 
 .PARAMETER Settings
     A settings file (organisation preset) to install as the user settings file.
@@ -36,6 +42,7 @@
 [CmdletBinding()]
 param(
     [string] $Root = (Join-Path $env:LOCALAPPDATA 'JenkinsClient\versions'),
+    [string] $Current = (Join-Path $env:LOCALAPPDATA 'JenkinsClient\current'),
     [string] $Settings,
     [switch] $ForceSettings,
     [string] $Name = 'jenkinsclient',
@@ -52,9 +59,18 @@ New-Item -ItemType Directory -Force $Root | Out-Null
 
 & dotnet publish $project -c Release -o $destination --nologo
 if ($LASTEXITCODE -ne 0) { throw "dotnet publish failed (exit $LASTEXITCODE)." }
-$exe = (Join-Path $destination 'jenkinsclient.exe').Replace('\', '/')
 Write-Host ''
 Write-Host "Published $version to $destination"
+
+# re-point the junction: remove the link itself (never anything through it; running servers keep their folder), then
+# recreate it. A session starting in between fails once; /mcp reconnects.
+if (Test-Path -LiteralPath $Current) {
+    if ((Get-Item -LiteralPath $Current -Force).LinkType -ne 'Junction') { throw "$Current exists and is not a junction." }
+    [IO.Directory]::Delete($Current, $false)
+}
+New-Item -ItemType Junction -Path $Current -Target $destination | Out-Null
+$exe = (Join-Path $Current 'jenkinsclient.exe').Replace('\', '/')
+Write-Host "Junction $Current -> $destination"
 
 # the user settings file: sites, users, token references. Never overwritten by an update.
 $userSettings = Join-Path $env:LOCALAPPDATA 'JenkinsClient\settings.json'
@@ -79,22 +95,41 @@ if ($NoRegister) {
     Write-Host "  claude mcp add --scope user $Name -- $exe --stdio"
 }
 else {
-    & claude mcp remove --scope user $Name *> $null   # absent on a first install
-    & claude mcp add --scope user $Name -- $exe --stdio
-    if ($LASTEXITCODE -ne 0) { throw "claude mcp add failed (exit $LASTEXITCODE)." }
-    Write-Host "Registered: $Name -> $exe --stdio"
+    # the command is stable, so after the first install with the junction there is nothing to change
+    $registered = (& claude mcp get $Name 2>$null) -join "`n"
+    if ($LASTEXITCODE -eq 0 -and $registered -match "(?m)^\s*Command: $([regex]::Escape($exe))\s*$" -and
+        $registered -match '(?m)^\s*Args: --stdio\s*$') {
+        Write-Host "Already registered: $Name -> $exe --stdio"
+    }
+    else {
+        & claude mcp remove --scope user $Name *> $null   # absent on a first install
+        & claude mcp add --scope user $Name -- $exe --stdio
+        if ($LASTEXITCODE -ne 0) { throw "claude mcp add failed (exit $LASTEXITCODE)." }
+        Write-Host "Registered: $Name -> $exe --stdio"
+    }
 }
 
 Write-Host "Command line: $exe check | sites | set-token <site>"
 
-# older copies; one a server still runs from is left whole (deleting part of it would break that server's next lazy load)
-$running = @(Get-CimInstance Win32_Process -Filter "Name='jenkinsclient.exe'" | ForEach-Object ExecutablePath)
-foreach ($dir in @(Get-ChildItem $Root -Directory | Where-Object FullName -ne (Get-Item $destination).FullName)) {
-    $prefix = $dir.FullName.TrimEnd('\') + '\'
-    if ($running | Where-Object { $_ -and $_.StartsWith($prefix, [StringComparison]::OrdinalIgnoreCase) }) {
-        Write-Host "Kept old copy $($dir.FullName) (a running session uses it; removed by a later install)"
-        continue
+# older copies. Path matching against running processes does not work: a server started through the junction reports
+# ...\current\jenkinsclient.exe as its image. Instead each old copy is first renamed, which Windows refuses while a
+# process runs from it; only a renamed (so unused) copy is deleted. A copy in use is left whole (deleting part of it
+# would break that server's next lazy load) and goes on a later install. The junction target is never touched.
+$keep = (Get-Item -LiteralPath $destination).FullName.TrimEnd('\')
+foreach ($dir in @(Get-ChildItem -LiteralPath $Root -Directory -Force)) {
+    if ($dir.LinkType -or $dir.FullName.TrimEnd('\') -eq $keep) { continue }
+    $doomed = $dir.FullName
+    if ($dir.Name -notlike '*.deleting') {   # *.deleting: an earlier install renamed it but could not finish deleting
+        $doomed = "$($dir.FullName).deleting"
+        try { Rename-Item -LiteralPath $dir.FullName -NewName "$($dir.Name).deleting" -ErrorAction Stop }
+        catch {
+            Write-Host "Kept old copy $($dir.FullName) (in use, e.g. by a running session; removed by a later install)"
+            continue
+        }
     }
-    Remove-Item $dir.FullName -Recurse -Force
-    Write-Host "Removed old copy $($dir.FullName)"
+    try {
+        Remove-Item -LiteralPath $doomed -Recurse -Force -ErrorAction Stop
+        Write-Host "Removed old copy $($dir.FullName)"
+    }
+    catch { Write-Warning "Could not fully remove $doomed ($($_.Exception.Message)); a later install retries." }
 }

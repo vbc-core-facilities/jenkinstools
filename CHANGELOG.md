@@ -5,6 +5,12 @@ see [Versioning](README.md#versioning). Newest first within each tool.
 
 ## jenkinsclient
 
+### jenkinsclient-v0.2.0 - 2026-11-08
+`Install-JenkinsClientStdio.ps1` keeps the junction `%LOCALAPPDATA%\JenkinsClient\current` on the newest copy and registers
+the MCP server as `current\jenkinsclient.exe --stdio`, a command that no longer changes with each install (registration is
+skipped when it is already that). Old copies are removed only if they can be renamed, i.e. no process runs from them;
+matching process paths missed servers started through the junction.
+
 ### jenkinsclient-v0.1.0 - 2026-11-08
 First version: JenkinsTools.Client (.NET library: sites, token references, jobs, builds, console logs, test reports, queue,
 scan, start, wait, abort), the MCP server `jenkinsclient` (stdio; HTTP on loopback) and its command line (`check`, `sites`,
