@@ -1,0 +1,15 @@
+<Project Sdk="Microsoft.NET.Sdk.Web">
+
+  <PropertyGroup>
+    <Description>jenkinsclient: the MCP server (stdio, or HTTP on loopback) and the command line (check, sites, set-token).</Description>
+    <AssemblyName>jenkinsclient</AssemblyName>
+    <RootNamespace>JenkinsTools.Client.Host</RootNamespace>
+    <IsPackable>false</IsPackable>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\JenkinsTools.Client\JenkinsTools.Client.csproj" />
+    <ProjectReference Include="..\JenkinsTools.Client.Mcp\JenkinsTools.Client.Mcp.csproj" />
+  </ItemGroup>
+
+</Project>

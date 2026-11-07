@@ -1,0 +1,10 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/JenkinsTools.Client/JenkinsTools.Client.csproj" />
+    <Project Path="src/JenkinsTools.Client.Mcp/JenkinsTools.Client.Mcp.csproj" />
+    <Project Path="src/JenkinsTools.Client.Host/JenkinsTools.Client.Host.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/JenkinsTools.Client.Tests/JenkinsTools.Client.Tests.csproj" />
+  </Folder>
+</Solution>

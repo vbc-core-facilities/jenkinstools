@@ -16,6 +16,13 @@ Not pipeline steps, but in this repo too:
 - `testserver/`: a local Jenkins that runs real Jenkinsfiles of local repos, driven by `testserver/testserver.sh` (and the
   Claude skill `.claude/skills/jenkins-testserver`). See [testserver/README.md](testserver/README.md).
 - `probe/pipeline-introspection/`: a Jenkinsfile that reports what a pipeline on a real Jenkins can see, without admin rights.
+- `jenkinsclient/`: a client of any Jenkins through its public REST API: MCP server (stdio, or HTTP on loopback), command
+  line and the .NET library `JenkinsTools.Client`. Sites with user + API token by reference (Windows Credential Manager,
+  1Password, env, file). See [jenkinsclient/README.md](jenkinsclient/README.md).
+
+Jenkins loads this whole repository as the shared library: `vars/`, `resources/` and a root `src/` (the Groovy classpath)
+mean something to it. Code of the other tools stays in their own folders, never in a root `src/`, and build output is
+never committed (every `library 'jenkinstools@...'` clones the repository).
 
 **Failures don't break the build by default.** Any notification problem only prints a warning and the build carries on. `failOnError: true` fails the build instead. Aborting a build is never swallowed.
 
@@ -113,6 +120,9 @@ output.
   - the version in the tool's header, plus its `toolVersion()` where it has one (the deploy tools print it in the build log)
   - the tool's section in `CHANGELOG.md`
 - **Releasing a tool:** commit, then `git tag -a <tool>-vX.Y.Z -m "<tool> vX.Y.Z" && git push origin main <tool>-vX.Y.Z`.
+
+Tools that are not pipeline steps follow the same tag rule: `testserver-vX.Y.Z`, `jenkinsclient-vX.Y.Z`. jenkinsclient's
+assembly and package version comes from its tags (MinVer, prefix `jenkinsclient-v`), not from a header.
 
 `v1` is a legacy whole-library tag from before per-tool versioning, kept for existing pins. See CHANGELOG.md.
 

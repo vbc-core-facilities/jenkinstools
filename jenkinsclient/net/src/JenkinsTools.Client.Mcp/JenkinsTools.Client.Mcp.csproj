@@ -1,0 +1,18 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    
+    <Description>MCP tools over JenkinsTools.Client: any Jenkins as a client (jobs, builds, logs, tests, queue, scan, start, wait, abort), for stdio or HTTP hosts.</Description>
+    <IsPackable>false</IsPackable>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
+    <PackageReference Include="ModelContextProtocol.AspNetCore" Version="2.2.0" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\JenkinsTools.Client\JenkinsTools.Client.csproj" />
+  </ItemGroup>
+
+</Project>
