@@ -11,6 +11,12 @@ using JenkinsTools.Client.Mcp;
 // jenkinsclient sites                   the configured sites and where the settings come from
 // jenkinsclient set-token <site>        prompts for the site's API token (not echoed), stores it in the Windows Credential Manager
 
+// started through the installer's current junction: run the copy it points to now (see LinkRelay)
+if (LinkRelay.RunFromLinkTarget(args) is { } relayed)
+{
+    return relayed;
+}
+
 var command = args.FirstOrDefault() ?? "help";
 var rest = args.Skip(1).ToArray();
 

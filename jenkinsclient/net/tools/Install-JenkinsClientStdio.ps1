@@ -10,8 +10,13 @@
     overwrites a copy: each install publishes into its own folder under Root (git version + time stamp), re-points the
     directory junction Current (%LOCALAPPDATA%\JenkinsClient\current) at it, and deletes older copies no process runs
     from (locked ones go on a later install). The user-scope registration always names Current\jenkinsclient.exe, a
-    command that never changes. Running sessions keep their server (the junction is only resolved when a process
-    starts); new sessions (and /mcp reconnects) start the new one.
+    command that never changes. Running sessions keep their server; new sessions (and /mcp reconnects) start the new one.
+
+    A process started through the junction opens every file by its ...\current\... path, also assemblies .NET loads
+    lazily, long after start, so an old server could load the new version's after a re-point (a single-file publish
+    does not help: the runtime reopens the bundle by path). So jenkinsclient.exe, started through a link, only relays:
+    it starts the copy the link points to now (by its version folder path) with the same arguments and stdio, and
+    returns its exit code.
 
     Sites are not part of the install: they live in the user settings file (%LOCALAPPDATA%\JenkinsClient\settings.json),
     which updates never touch. -Settings copies a preset there (e.g. vbc_deployment JenkinsClientVbc\settings.json), but

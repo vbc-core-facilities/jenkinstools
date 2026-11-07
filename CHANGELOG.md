@@ -5,6 +5,12 @@ see [Versioning](README.md#versioning). Newest first within each tool.
 
 ## jenkinsclient
 
+### jenkinsclient-v0.2.1 - 2026-11-08
+Fix of 0.2.0: a server started through the `current` junction loaded assemblies it had not loaded yet from whatever the
+junction pointed to by then, i.e. from a newer install. Started through a link, `jenkinsclient.exe` now starts the copy the
+link points to (by its version folder path) as a child with the same arguments and stdio, and returns its exit code (as
+AzureTools does). A single-file publish was tested and does not help: the runtime reopens the bundle by path.
+
 ### jenkinsclient-v0.2.0 - 2026-11-08
 `Install-JenkinsClientStdio.ps1` keeps the junction `%LOCALAPPDATA%\JenkinsClient\current` on the newest copy and registers
 the MCP server as `current\jenkinsclient.exe --stdio`, a command that no longer changes with each install (registration is

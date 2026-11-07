@@ -66,7 +66,10 @@ The script publishes into `%LOCALAPPDATA%\JenkinsClient\versions\<version>_<time
 `%LOCALAPPDATA%\JenkinsClient\current` at that copy and registers the user-scope MCP server `jenkinsclient` as
 `%LOCALAPPDATA%\JenkinsClient\current\jenkinsclient.exe --stdio`. That command never changes, so a machine setup can name
 it and detect drift. Re-run the script to update: only the junction moves; open sessions keep running from their version
-folder, new sessions (and `/mcp` reconnects) start the new one. Old copies are deleted once no process runs from them (a
+folder, new sessions (and `/mcp` reconnects) start the new one. Started through the junction, `jenkinsclient.exe` only
+relays: it starts the copy the junction points to by its version folder path (same arguments, inherited stdio), because a
+process running through the junction would load lazily loaded assemblies from whatever the junction points to later (a
+single-file publish does not avoid that, tested). Old copies are deleted once no process runs from them (a
 copy is first renamed, which Windows refuses while it is in use; such a copy goes on a later install). The user settings
 file is never overwritten (`-ForceSettings` does, keeping a `.bak`).
 
